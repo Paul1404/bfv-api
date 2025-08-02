@@ -11,16 +11,21 @@ import {
 import path from "path";
 
 // === CONFIGURATION ===
+
+// List of teams to export (add more as needed)
 const TEAMS = [
   { id: "016PBQB78C000000VV0AG80NVV8OQVTB", name: "Gädheim-Untereuerheim" },
   { id: "02IDHSKCTG000000VS5489B2VU2I8R4H", name: "Gädheim-Untereuerheim II" },
 ];
+
+// Output directory for all exports and HTML
 const EXPORT_DIR = "./exports";
 
 // === TYPES ===
+
+// Structure of a row in the CSV/XLSX export (Match-ID removed)
 interface ExportMatch {
   mannschaft: string;
-  matchId: string;
   wettbewerb: string;
   wettbewerbstyp: string;
   datum: string;
@@ -32,12 +37,19 @@ interface ExportMatch {
 }
 
 // === UTILS ===
+
+/**
+ * Ensures the export directory exists.
+ */
 function ensureExportDir() {
   if (!existsSync(EXPORT_DIR)) {
     mkdirSync(EXPORT_DIR);
   }
 }
 
+/**
+ * Returns a timestamp string for filenames, e.g. 2025-08-02_14-30-00
+ */
 function getTimestamp(): string {
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -56,6 +68,9 @@ function getTimestamp(): string {
   );
 }
 
+/**
+ * Sanitizes a string for use in filenames (umlauts, spaces, special chars)
+ */
 function sanitizeFilename(name: string): string {
   return name
     .replace(/ä/g, "ae")
@@ -65,14 +80,23 @@ function sanitizeFilename(name: string): string {
     .replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+/**
+ * Formats a date string, returns empty string if null
+ */
 function formatDate(date: string | null): string {
   return date ?? "";
 }
 
+/**
+ * Formats a time string, returns empty string if null
+ */
 function formatTime(time: string | null): string {
   return time ?? "";
 }
 
+/**
+ * Converts a file size in bytes to a human-readable string
+ */
 function humanFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
@@ -80,6 +104,10 @@ function humanFileSize(bytes: number): string {
 }
 
 // === EXPORT FUNCTIONS ===
+
+/**
+ * Exports matches to a CSV file with UTF-8 BOM for Excel compatibility.
+ */
 function exportToCSV(matches: ExportMatch[], filename: string) {
   const parser = new Json2CsvParser({ header: true });
   const csv = parser.parse(matches);
@@ -95,18 +123,16 @@ function exportToCSV(matches: ExportMatch[], filename: string) {
   console.log(`✅ CSV exportiert: ${csvPath}`);
 }
 
+/**
+ * Exports matches to an XLSX file with styled header and zebra striping.
+ */
 async function exportToXLSX(matches: ExportMatch[], filename: string) {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Spiele");
 
+  // Define columns (Match-ID removed)
   worksheet.columns = [
     { header: "Mannschaft", key: "mannschaft", width: 20 },
-    {
-      header: "Match-ID",
-      key: "matchId",
-      width: 32,
-      style: { font: { name: "Consolas" } }, // monospace for clarity
-    },
     { header: "Wettbewerb", key: "wettbewerb", width: 25 },
     { header: "Wettbewerbstyp", key: "wettbewerbstyp", width: 20 },
     { header: "Datum", key: "datum", width: 12 },
@@ -117,9 +143,10 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
     { header: "Vorab veröffentlicht", key: "vorabVeröffentlicht", width: 18 },
   ];
 
+  // Add all match rows
   matches.forEach((match) => worksheet.addRow(match));
 
-  // Auto-fit columns
+  // Auto-fit columns to content
   worksheet.columns.forEach((column) => {
     let maxLength = column.header!.toString().length;
     column.eachCell?.({ includeEmpty: true }, (cell) => {
@@ -170,6 +197,10 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 }
 
 // === HTML GENERATION ===
+
+/**
+ * Returns the latest files with a given extension, sorted by modification time.
+ */
 function getLatestFiles(dir: string, ext: string, count: number): { name: string; mtime: number; size: number }[] {
   return readdirSync(dir)
     .filter((f) => f.endsWith(ext))
@@ -181,11 +212,15 @@ function getLatestFiles(dir: string, ext: string, count: number): { name: string
     .slice(0, count);
 }
 
+/**
+ * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
+ */
 function generateFancyIndexHtml(dir: string) {
   // List all CSV and XLSX files, newest first
   const allCSVs = getLatestFiles(dir, ".csv", 100);
   const allXLSXs = getLatestFiles(dir, ".xlsx", 100);
 
+  // Generates a table row for a file
   const fileRow = (file: { name: string; mtime: number; size: number }, type: "csv" | "xlsx") => `
     <tr>
       <td style="text-align:center;">
@@ -201,6 +236,7 @@ function generateFancyIndexHtml(dir: string) {
     </tr>
   `;
 
+  // HTML page with responsive table and auto-refresh
   const html = `<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -231,7 +267,7 @@ function generateFancyIndexHtml(dir: string) {
 <body>
   <h1>BFV Exports</h1>
   <p>Hier finden Sie die neuesten Exportdateien (CSV &amp; Excel) zum Download.<br>
-  Die Seite aktualisiert sich automatisch alle 5 Minuten.</p>
+  Die Seite aktualisiert sich automatisch jede Minute.</p>
   <div class="table-responsive">
     <table>
       <thead>
@@ -264,19 +300,26 @@ function generateFancyIndexHtml(dir: string) {
 }
 
 // === MAIN ===
+
+/**
+ * Main entrypoint: fetches matches, exports per-team and combined files, generates HTML.
+ */
 async function main() {
   console.log("Spiele werden abgerufen...");
   ensureExportDir();
   const timestamp = getTimestamp();
 
-  // Per-team exports
+  // Collect all matches for combined export
   let allMatches: ExportMatch[] = [];
+
+  // Export per-team files
   for (const team of TEAMS) {
     try {
+      // Fetch matches for this team
       const { data } = await bfvApi.listMatches({ params: { teamPermanentId: team.id } });
+      // Map API data to export format (without Match-ID)
       const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
         mannschaft: data.team.name,
-        matchId: match.matchId,
         wettbewerb: match.competitionName,
         wettbewerbstyp: match.competitionType,
         datum: formatDate(match.kickoffDate),
@@ -287,8 +330,10 @@ async function main() {
         vorabVeröffentlicht: match.prePublished ? "Ja" : "Nein",
       }));
 
+      // Add to combined list
       allMatches = allMatches.concat(teamMatches);
 
+      // Export per-team CSV and XLSX
       const sanitized = sanitizeFilename(team.name);
       const csvName = `Spiele_${sanitized}_${timestamp}.csv`;
       const xlsxName = `Spiele_${sanitized}_${timestamp}.xlsx`;
@@ -303,16 +348,18 @@ async function main() {
     }
   }
 
-  // Combined export
+  // Export combined CSV and XLSX for all teams
   const csvNameAll = `Spiele_Alle_Teams_${timestamp}.csv`;
   const xlsxNameAll = `Spiele_Alle_Teams_${timestamp}.xlsx`;
   exportToCSV(allMatches, csvNameAll);
   await exportToXLSX(allMatches, xlsxNameAll);
 
+  // Generate the HTML index page
   generateFancyIndexHtml(EXPORT_DIR);
   console.log("Fertig! 🚀");
 }
 
+// Run the main function and handle fatal errors
 main().catch((err) => {
   console.error("Fataler Fehler:", err);
   process.exit(1);

@@ -101,7 +101,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 
   worksheet.columns = [
     { header: "Mannschaft", key: "mannschaft", width: 20 },
-    { header: "Match-ID", key: "matchId", width: 20 },
+    { header: "Match-ID", key: "matchId", width: 30 },
     { header: "Wettbewerb", key: "wettbewerb", width: 25 },
     { header: "Wettbewerbstyp", key: "wettbewerbstyp", width: 20 },
     { header: "Datum", key: "datum", width: 12 },
@@ -202,6 +202,7 @@ function generateFancyIndexHtml(dir: string) {
   <meta charset="UTF-8">
   <title>BFV Exports</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
   <style>
     body { font-family: 'Segoe UI', Arial, sans-serif; margin: 2em; background: #f4f8fb; }
     h1 { color: #0070C0; }

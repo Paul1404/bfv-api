@@ -101,7 +101,12 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 
   worksheet.columns = [
     { header: "Mannschaft", key: "mannschaft", width: 20 },
-    { header: "Match-ID", key: "matchId", width: 30 },
+    {
+      header: "Match-ID",
+      key: "matchId",
+      width: 32,
+      style: { font: { name: "Consolas" } }, // monospace for clarity
+    },
     { header: "Wettbewerb", key: "wettbewerb", width: 25 },
     { header: "Wettbewerbstyp", key: "wettbewerbstyp", width: 20 },
     { header: "Datum", key: "datum", width: 12 },
@@ -121,7 +126,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
       const cellValue = cell.value ? cell.value.toString() : "";
       maxLength = Math.max(maxLength, cellValue.length);
     });
-    column.width = maxLength + 2;
+    column.width = Math.max(column.width ?? 10, maxLength + 2);
   });
 
   // Style header row
@@ -202,11 +207,12 @@ function generateFancyIndexHtml(dir: string) {
   <meta charset="UTF-8">
   <title>BFV Exports</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="60">
+  <meta http-equiv="refresh" content="300">
   <style>
     body { font-family: 'Segoe UI', Arial, sans-serif; margin: 2em; background: #f4f8fb; }
     h1 { color: #0070C0; }
-    table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 2px 8px #0001; }
+    .table-responsive { overflow-x: auto; width: 100%; display: block; }
+    table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 2px 8px #0001; min-width: 600px; }
     th, td { padding: 0.7em 1em; }
     th { background: #0070C0; color: #fff; text-align: left; }
     tr:nth-child(even) { background: #e6f0fa; }
@@ -215,34 +221,40 @@ function generateFancyIndexHtml(dir: string) {
     a:hover { text-decoration: underline; }
     .footer { margin-top: 2em; color: #888; font-size: 0.95em; }
     @media (max-width: 600px) {
-      table, thead, tbody, th, td, tr { display: block; }
+      .table-responsive { overflow-x: auto; width: 100%; display: block; }
+      table { min-width: 600px; }
       th, td { padding: 0.5em 0.5em; }
-      th { background: #0070C0; }
       tr { margin-bottom: 1em; }
     }
   </style>
 </head>
 <body>
   <h1>BFV Exports</h1>
-  <p>Hier finden Sie die neuesten Exportdateien (CSV &amp; Excel) zum Download.</p>
-  <table>
-    <thead>
-      <tr>
-        <th>Typ</th>
-        <th>Dateiname</th>
-        <th>Größe</th>
-        <th>Letzte Änderung</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${allCSVs.map((f) => fileRow(f, "csv")).join("\n")}
-      ${allXLSXs.map((f) => fileRow(f, "xlsx")).join("\n")}
-    </tbody>
-  </table>
+  <p>Hier finden Sie die neuesten Exportdateien (CSV &amp; Excel) zum Download.<br>
+  Die Seite aktualisiert sich automatisch alle 5 Minuten.</p>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>Typ</th>
+          <th>Dateiname</th>
+          <th>Größe</th>
+          <th>Letzte Änderung</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allCSVs.map((f) => fileRow(f, "csv")).join("\n")}
+        ${allXLSXs.map((f) => fileRow(f, "xlsx")).join("\n")}
+      </tbody>
+    </table>
+  </div>
   <div class="footer">
     Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
-    <a href="https://github.com/YOUR-USERNAME/YOUR-REPO" target="_blank">Projekt auf GitHub</a>
+    <a href="https://github.com/Paul1404/bfv-api" target="_blank">Projekt auf GitHub</a>
   </div>
+  <script>
+    setTimeout(() => window.location.reload(), 300000);
+  </script>
 </body>
 </html>
 `;

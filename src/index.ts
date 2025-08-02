@@ -1,6 +1,8 @@
 import { bfvApi } from "bfv-api";
 import { Parser as Json2CsvParser } from "json2csv";
 import ExcelJS from "exceljs";
+import { createEvents } from "ics";
+import type { EventAttributes } from "ics";
 import {
   writeFileSync,
   existsSync,
@@ -37,6 +39,20 @@ interface ExportMatch {
 }
 
 // === UTILS ===
+
+/**
+ * Helper to parse German date/time (DD.MM.YYYY, HH:mm) to [YYYY, M, D, H, M]
+ */
+function parseDateTime(date: string, time: string): [number, number, number, number, number] {
+  const [dayStr, monthStr, yearStr] = date.split(".");
+  const [hourStr, minuteStr] = time.split(":");
+  const day = Number(dayStr) || 0;
+  const month = Number(monthStr) || 0;
+  const year = Number(yearStr) || 0;
+  const hour = Number(hourStr) || 0;
+  const minute = Number(minuteStr) || 0;
+  return [year, month, day, hour, minute];
+}
 
 /**
  * Ensures the export directory exists.
@@ -104,6 +120,48 @@ function humanFileSize(bytes: number): string {
 }
 
 // === EXPORT FUNCTIONS ===
+
+/**
+ * Exports matches as an ICS calendar file.
+ */
+function exportToICS(matches: ExportMatch[], filename: string) {
+  const events: EventAttributes[] = matches
+    .filter(m => m.datum && m.uhrzeit)
+    .map(m => ({
+      title: `${m.heim} vs ${m.gast}`,
+      start: parseDateTime(m.datum, m.uhrzeit),
+      duration: { hours: 2 }, // Required by ics
+      description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
+    }));
+
+  createEvents(events, (error, value) => {
+    if (error) {
+      console.error("ICS export error:", error);
+      return;
+    }
+    writeFileSync(path.join(EXPORT_DIR, filename), value, "utf8");
+    console.log(`✅ ICS exportiert: ${path.join(EXPORT_DIR, filename)}`);
+  });
+}
+
+/**
+ * Exports matches as a Jira-compatible CSV file for task import.
+ */
+function exportToJiraCSV(matches: ExportMatch[], filename: string) {
+  // Jira expects columns like Summary, Description, Due Date, Issue Type
+  const jiraRows = matches.map(m => ({
+    Summary: `Match: ${m.heim} vs ${m.gast}`,
+    Description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
+    "Due Date": m.datum.split('.').reverse().join('-'), // Converts DD.MM.YYYY to YYYY-MM-DD
+    "Issue Type": "Task",
+  }));
+
+  const parser = new Json2CsvParser({ header: true, fields: ["Summary", "Description", "Due Date", "Issue Type"] });
+  const csv = parser.parse(jiraRows);
+  const csvWithBom = "\uFEFF" + csv;
+  writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
+  console.log(`✅ Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
+}
 
 /**
  * Exports matches to a CSV file with UTF-8 BOM for Excel compatibility.
@@ -333,13 +391,23 @@ async function main() {
       // Add to combined list
       allMatches = allMatches.concat(teamMatches);
 
-      // Export per-team CSV and XLSX
+      // Sanitize team name for filenames
       const sanitized = sanitizeFilename(team.name);
+
+      // Export per-team CSV and XLSX
       const csvName = `Spiele_${sanitized}_${timestamp}.csv`;
       const xlsxName = `Spiele_${sanitized}_${timestamp}.xlsx`;
-
       exportToCSV(teamMatches, csvName);
       await exportToXLSX(teamMatches, xlsxName);
+
+      // Export per-team ICS
+      const icsName = `Spiele_${sanitized}_${timestamp}.ics`;
+      exportToICS(teamMatches, icsName);
+
+      // Export per-team Jira CSV
+      const jiraCsvName = `Jira_Spiele_${sanitized}_${timestamp}.csv`;
+      exportToJiraCSV(teamMatches, jiraCsvName);
+
     } catch (error) {
       console.error(
         `❌ Fehler beim Abrufen der Spiele für Team ${team.name}:`,
@@ -353,6 +421,14 @@ async function main() {
   const xlsxNameAll = `Spiele_Alle_Teams_${timestamp}.xlsx`;
   exportToCSV(allMatches, csvNameAll);
   await exportToXLSX(allMatches, xlsxNameAll);
+
+  // Export combined ICS for all teams
+  const icsNameAll = `Spiele_Alle_Teams_${timestamp}.ics`;
+  exportToICS(allMatches, icsNameAll);
+
+  // Export combined Jira CSV for all teams
+  const jiraCsvNameAll = `Jira_Spiele_Alle_Teams_${timestamp}.csv`;
+  exportToJiraCSV(allMatches, jiraCsvNameAll);
 
   // Generate the HTML index page
   generateFancyIndexHtml(EXPORT_DIR);

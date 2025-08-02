@@ -1,0 +1,24 @@
+{
+  "name": "BFV Exporter Dev",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20", // Node 20 + TypeScript
+  "features": {
+    "ghcr.io/devcontainers-extra/features/pnpm:2": {}
+    },
+  "postCreateCommand": "pnpm install",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next",
+        "ms-azuretools.vscode-docker",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+  "forwardPorts": [],
+  "remoteUser": "node"
+}

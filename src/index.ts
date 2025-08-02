@@ -3,6 +3,7 @@ import { Parser as Json2CsvParser } from "json2csv";
 import ExcelJS from "exceljs";
 import { createEvents } from "ics";
 import type { EventAttributes } from "ics";
+type ExportFile = { name: string; mtime: number; size: number };
 import {
   writeFileSync,
   existsSync,
@@ -52,6 +53,66 @@ function parseDateTime(date: string, time: string): [number, number, number, num
   const hour = Number(hourStr) || 0;
   const minute = Number(minuteStr) || 0;
   return [year, month, day, hour, minute];
+}
+
+function getFilesByTypeAndTeam(dir: string, ext: string): Record<string, ExportFile[]> {
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith(ext))
+    .map((f) => {
+      const stats = statSync(path.join(dir, f));
+      return { name: f, mtime: stats.mtimeMs, size: stats.size };
+    });
+
+  const byTeam: Record<string, ExportFile[]> = {};
+  for (const file of files) {
+    const match = file.name.match(/^((Jira_)?Spiele)_(.+)_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\./);
+    const team = match && match[3] ? match[3] : "Unbekannt";
+    if (!byTeam[team]) byTeam[team] = [];
+    byTeam[team].push(file);
+  }
+  for (const team in byTeam) {
+    if (byTeam[team]) {
+      byTeam[team].sort((a, b) => b.mtime - a.mtime);
+    }
+  }
+  return byTeam;
+}
+
+function sectionHtml(title: string, byTeam: Record<string, ExportFile[]>, ext: string, icon: string) {
+  return `
+    <h2>${icon} ${title}</h2>
+    ${Object.entries(byTeam)
+      .map(
+        ([team, files]) => `
+        <h3>${team.replace(/_/g, " ")}</h3>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Dateiname</th>
+                <th>Größe</th>
+                <th>Letzte Änderung</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${files
+                .map(
+                  (f) => `
+                <tr>
+                  <td><a href="${f.name}" download>${f.name}</a></td>
+                  <td>${humanFileSize(f.size)}</td>
+                  <td>${new Date(f.mtime).toLocaleString("de-DE")}</td>
+                </tr>
+              `
+                )
+                .join("\n")}
+            </tbody>
+          </table>
+        </div>
+      `
+      )
+      .join("\n")}
+  `;
 }
 
 /**
@@ -274,27 +335,18 @@ function getLatestFiles(dir: string, ext: string, count: number): { name: string
  * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
  */
 function generateFancyIndexHtml(dir: string) {
-  // List all CSV and XLSX files, newest first
-  const allCSVs = getLatestFiles(dir, ".csv", 100);
-  const allXLSXs = getLatestFiles(dir, ".xlsx", 100);
+  const csvByTeam = getFilesByTypeAndTeam(dir, ".csv");
+  const xlsxByTeam = getFilesByTypeAndTeam(dir, ".xlsx");
+  const icsByTeam = getFilesByTypeAndTeam(dir, ".ics");
 
-  // Generates a table row for a file
-  const fileRow = (file: { name: string; mtime: number; size: number }, type: "csv" | "xlsx") => `
-    <tr>
-      <td style="text-align:center;">
-        ${type === "csv"
-          ? '<span title="CSV" style="font-size:1.5em;">📄</span>'
-          : '<span title="Excel" style="font-size:1.5em;">📊</span>'}
-      </td>
-      <td>
-        <a href="${file.name}" download>${file.name}</a>
-      </td>
-      <td>${humanFileSize(file.size)}</td>
-      <td>${new Date(file.mtime).toLocaleString("de-DE")}</td>
-    </tr>
-  `;
+  // Jira CSV: only files starting with Jira_
+  const jiraCsvByTeam = getFilesByTypeAndTeam(dir, ".csv");
+  for (const team in jiraCsvByTeam) {
+    if (jiraCsvByTeam[team]) {
+      jiraCsvByTeam[team] = jiraCsvByTeam[team]!.filter(f => f.name.startsWith("Jira_"));
+    }
+  }
 
-  // HTML page with responsive table and auto-refresh
   const html = `<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -305,6 +357,8 @@ function generateFancyIndexHtml(dir: string) {
   <style>
     body { font-family: 'Segoe UI', Arial, sans-serif; margin: 2em; background: #f4f8fb; }
     h1 { color: #0070C0; }
+    h2 { margin-top: 2em; color: #005080; }
+    h3 { margin-top: 1.2em; color: #333; }
     .table-responsive { overflow-x: auto; width: 100%; display: block; }
     table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 2px 8px #0001; min-width: 600px; }
     th, td { padding: 0.7em 1em; }
@@ -324,24 +378,12 @@ function generateFancyIndexHtml(dir: string) {
 </head>
 <body>
   <h1>BFV Exports</h1>
-  <p>Hier finden Sie die neuesten Exportdateien (CSV &amp; Excel) zum Download.<br>
-  Die Seite aktualisiert sich automatisch jede Minute.</p>
-  <div class="table-responsive">
-    <table>
-      <thead>
-        <tr>
-          <th>Typ</th>
-          <th>Dateiname</th>
-          <th>Größe</th>
-          <th>Letzte Änderung</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${allCSVs.map((f) => fileRow(f, "csv")).join("\n")}
-        ${allXLSXs.map((f) => fileRow(f, "xlsx")).join("\n")}
-      </tbody>
-    </table>
-  </div>
+  <p>Hier finden Sie die neuesten Exportdateien (CSV, Excel, ICS, Jira) zum Download.<br>
+  Die Seite aktualisiert sich automatisch alle 5 Minuten.</p>
+  ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
+  ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
+  ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
+  ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", "📝")}
   <div class="footer">
     Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
     <a href="https://github.com/Paul1404/bfv-api" target="_blank">Projekt auf GitHub</a>

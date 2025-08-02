@@ -11,12 +11,11 @@ import {
 import path from "path";
 
 // === CONFIGURATION ===
-const TEAM_IDS = [
-  "016PBQB78C000000VV0AG80NVV8OQVTB",
-  "02IDHSKCTG000000VS5489B2VU2I8R4H",
+const TEAMS = [
+  { id: "016PBQB78C000000VV0AG80NVV8OQVTB", name: "Gädheim-Untereuerheim" },
+  { id: "02IDHSKCTG000000VS5489B2VU2I8R4H", name: "Gädheim-Untereuerheim II" },
 ];
 const EXPORT_DIR = "./exports";
-const BASE_FILENAME = "matches";
 
 // === TYPES ===
 interface ExportMatch {
@@ -57,6 +56,15 @@ function getTimestamp(): string {
   );
 }
 
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 function formatDate(date: string | null): string {
   return date ?? "";
 }
@@ -71,42 +79,11 @@ function humanFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-// === MAIN LOGIC ===
-async function fetchAllMatches(): Promise<ExportMatch[]> {
-  const allMatches: ExportMatch[] = [];
-  for (const teamPermanentId of TEAM_IDS) {
-    try {
-      const { data } = await bfvApi.listMatches({ params: { teamPermanentId } });
-      const team = data.team;
-      for (const match of data.matches) {
-        allMatches.push({
-          mannschaft: team.name,
-          matchId: match.matchId,
-          wettbewerb: match.competitionName,
-          wettbewerbstyp: match.competitionType,
-          datum: formatDate(match.kickoffDate),
-          uhrzeit: formatTime(match.kickoffTime),
-          heim: match.homeTeamName,
-          gast: match.guestTeamName,
-          ergebnis: match.result ?? "",
-          vorabVeröffentlicht: match.prePublished ? "Ja" : "Nein",
-        });
-      }
-    } catch (error) {
-      console.error(
-        `❌ Fehler beim Abrufen der Spiele für Team ${teamPermanentId}:`,
-        error
-      );
-    }
-  }
-  return allMatches;
-}
-
-function exportToCSV(matches: ExportMatch[], timestamp: string) {
+// === EXPORT FUNCTIONS ===
+function exportToCSV(matches: ExportMatch[], filename: string) {
   const parser = new Json2CsvParser({ header: true });
   const csv = parser.parse(matches);
-  const csvFilename = `${BASE_FILENAME}_${timestamp}.csv`;
-  const csvPath = path.join(EXPORT_DIR, csvFilename);
+  const csvPath = path.join(EXPORT_DIR, filename);
 
   // Write UTF-8 BOM for Excel compatibility with umlauts
   const csvWithBom = "\uFEFF" + csv;
@@ -116,10 +93,9 @@ function exportToCSV(matches: ExportMatch[], timestamp: string) {
   }
   writeFileSync(csvPath, csvWithBom, "utf8");
   console.log(`✅ CSV exportiert: ${csvPath}`);
-  return csvFilename;
 }
 
-async function exportToXLSX(matches: ExportMatch[], timestamp: string) {
+async function exportToXLSX(matches: ExportMatch[], filename: string) {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Spiele");
 
@@ -179,15 +155,13 @@ async function exportToXLSX(matches: ExportMatch[], timestamp: string) {
     }
   });
 
-  const xlsxFilename = `${BASE_FILENAME}_${timestamp}.xlsx`;
-  const xlsxPath = path.join(EXPORT_DIR, xlsxFilename);
+  const xlsxPath = path.join(EXPORT_DIR, filename);
 
   if (existsSync(xlsxPath)) {
     console.warn(`⚠️  Datei ${xlsxPath} existiert bereits und wird überschrieben.`);
   }
   await workbook.xlsx.writeFile(xlsxPath);
   console.log(`✅ XLSX exportiert: ${xlsxPath}`);
-  return xlsxFilename;
 }
 
 // === HTML GENERATION ===
@@ -203,8 +177,9 @@ function getLatestFiles(dir: string, ext: string, count: number): { name: string
 }
 
 function generateFancyIndexHtml(dir: string) {
-  const latestCSVs = getLatestFiles(dir, ".csv", 2);
-  const latestXLSXs = getLatestFiles(dir, ".xlsx", 2);
+  // List all CSV and XLSX files, newest first
+  const allCSVs = getLatestFiles(dir, ".csv", 100);
+  const allXLSXs = getLatestFiles(dir, ".xlsx", 100);
 
   const fileRow = (file: { name: string; mtime: number; size: number }, type: "csv" | "xlsx") => `
     <tr>
@@ -259,13 +234,13 @@ function generateFancyIndexHtml(dir: string) {
       </tr>
     </thead>
     <tbody>
-      ${latestCSVs.map((f) => fileRow(f, "csv")).join("\n")}
-      ${latestXLSXs.map((f) => fileRow(f, "xlsx")).join("\n")}
+      ${allCSVs.map((f) => fileRow(f, "csv")).join("\n")}
+      ${allXLSXs.map((f) => fileRow(f, "xlsx")).join("\n")}
     </tbody>
   </table>
   <div class="footer">
     Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
-    <a href="https://github.com/Paul1404/bfv-api" target="_blank">Projekt auf GitHub</a>
+    <a href="https://github.com/YOUR-USERNAME/YOUR-REPO" target="_blank">Projekt auf GitHub</a>
   </div>
 </body>
 </html>
@@ -275,18 +250,52 @@ function generateFancyIndexHtml(dir: string) {
   console.log(`✅ index.html generiert: ${path.join(dir, "index.html")}`);
 }
 
-// === ENTRYPOINT ===
+// === MAIN ===
 async function main() {
   console.log("Spiele werden abgerufen...");
   ensureExportDir();
-  const matches = await fetchAllMatches();
-  if (matches.length === 0) {
-    console.log("Keine Spiele für die angegebenen Teams gefunden.");
-    return;
-  }
   const timestamp = getTimestamp();
-  exportToCSV(matches, timestamp);
-  await exportToXLSX(matches, timestamp);
+
+  // Per-team exports
+  let allMatches: ExportMatch[] = [];
+  for (const team of TEAMS) {
+    try {
+      const { data } = await bfvApi.listMatches({ params: { teamPermanentId: team.id } });
+      const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
+        mannschaft: data.team.name,
+        matchId: match.matchId,
+        wettbewerb: match.competitionName,
+        wettbewerbstyp: match.competitionType,
+        datum: formatDate(match.kickoffDate),
+        uhrzeit: formatTime(match.kickoffTime),
+        heim: match.homeTeamName,
+        gast: match.guestTeamName,
+        ergebnis: match.result ?? "",
+        vorabVeröffentlicht: match.prePublished ? "Ja" : "Nein",
+      }));
+
+      allMatches = allMatches.concat(teamMatches);
+
+      const sanitized = sanitizeFilename(team.name);
+      const csvName = `Spiele_${sanitized}_${timestamp}.csv`;
+      const xlsxName = `Spiele_${sanitized}_${timestamp}.xlsx`;
+
+      exportToCSV(teamMatches, csvName);
+      await exportToXLSX(teamMatches, xlsxName);
+    } catch (error) {
+      console.error(
+        `❌ Fehler beim Abrufen der Spiele für Team ${team.name}:`,
+        error
+      );
+    }
+  }
+
+  // Combined export
+  const csvNameAll = `Spiele_Alle_Teams_${timestamp}.csv`;
+  const xlsxNameAll = `Spiele_Alle_Teams_${timestamp}.xlsx`;
+  exportToCSV(allMatches, csvNameAll);
+  await exportToXLSX(allMatches, xlsxNameAll);
+
   generateFancyIndexHtml(EXPORT_DIR);
   console.log("Fertig! 🚀");
 }

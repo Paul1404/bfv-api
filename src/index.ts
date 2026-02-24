@@ -215,7 +215,7 @@ function exportToICS(matches: ExportMatch[], filename: string) {
  * - "Issue Type": e.g. "Task" for parents, "Sub-task" for children
  */
 function exportToJiraCSV(matches: ExportMatch[], filename: string) {
-  const DEFAULT_STATUS = "In Progress";
+  const DEFAULT_STATUS = "Backlog";
   const DEFAULT_EPIC_KEY = "SVU-119";
 
   if (!matches.length) {

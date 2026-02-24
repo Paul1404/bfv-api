@@ -216,6 +216,7 @@ function exportToICS(matches: ExportMatch[], filename: string) {
  */
 function exportToJiraCSV(matches: ExportMatch[], filename: string) {
   const DEFAULT_STATUS = "In Progress";
+  const DEFAULT_EPIC_KEY = "SVU-119";
 
   if (!matches.length) {
     const parser = new Json2CsvParser({
@@ -310,7 +311,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     "Issue Type": string;
     Status: string;
     "Work item ID": number;
-    Parent: number | "" ;
+    Parent: number | string | "" ;
   }[] = [];
 
   // Parent rows: one per month (e.g. "Spiele Monat März 2025")
@@ -330,7 +331,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
       "Issue Type": "Task",
       Status: DEFAULT_STATUS,
       "Work item ID": id,
-      Parent: "",
+      Parent: DEFAULT_EPIC_KEY || "",
     });
   }
 

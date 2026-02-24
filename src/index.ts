@@ -261,7 +261,11 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     if (parts.length !== 3) {
       return { key: "ohne-datum", label: "Ohne Datum" };
     }
-    const [, monthStr, yearStr] = parts;
+    const monthStr = parts[1];
+    const yearStr = parts[2];
+    if (!monthStr || !yearStr) {
+      return { key: "ohne-datum", label: "Ohne Datum" };
+    }
     const month = Number(monthStr);
     const year = Number(yearStr);
     if (!month || month < 1 || month > 12 || !year) {

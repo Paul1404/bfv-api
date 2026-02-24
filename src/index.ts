@@ -215,10 +215,12 @@ function exportToICS(matches: ExportMatch[], filename: string) {
  * - "Issue Type": e.g. "Task" for parents, "Sub-task" for children
  */
 function exportToJiraCSV(matches: ExportMatch[], filename: string) {
+  const DEFAULT_STATUS = "To Do";
+
   if (!matches.length) {
     const parser = new Json2CsvParser({
       header: true,
-      fields: ["Summary", "Description", "Due Date", "Issue Type", "Work item ID", "Parent"],
+      fields: ["Summary", "Description", "Due Date", "Issue Type", "Status", "Work item ID", "Parent"],
     });
     const csvWithBom = "\uFEFF" + parser.parse([]);
     writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
@@ -306,6 +308,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     Description: string;
     "Due Date": string;
     "Issue Type": string;
+    Status: string;
     "Work item ID": number;
     Parent: number | "" ;
   }[] = [];
@@ -325,6 +328,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
       Description: "",
       "Due Date": "",
       "Issue Type": "Task",
+      Status: DEFAULT_STATUS,
       "Work item ID": id,
       Parent: "",
     });
@@ -357,6 +361,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
         Description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
         "Due Date": formatDueDate(m.datum),
         "Issue Type": "Sub-task",
+        Status: DEFAULT_STATUS,
         "Work item ID": id,
         Parent: parentId,
       });
@@ -365,7 +370,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
 
   const parser = new Json2CsvParser({
     header: true,
-    fields: ["Summary", "Description", "Due Date", "Issue Type", "Work item ID", "Parent"],
+    fields: ["Summary", "Description", "Due Date", "Issue Type", "Status", "Work item ID", "Parent"],
   });
   const csv = parser.parse(jiraRows);
   const csvWithBom = "\uFEFF" + csv;

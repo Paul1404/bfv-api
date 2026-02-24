@@ -244,18 +244,6 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     "Dezember",
   ];
 
-  const formatDueDate = (datum: string): string => {
-    if (!datum) return "";
-    const parts = datum.split(".");
-    if (parts.length !== 3) return "";
-    const [dayStr, monthStr, yearStr] = parts;
-    if (!dayStr || !monthStr || !yearStr) return "";
-    const day = dayStr.padStart(2, "0");
-    const month = monthStr.padStart(2, "0");
-    const year = yearStr;
-    return `${year}-${month}-${day}`;
-  };
-
   const getMonthKeyAndLabel = (datum: string): { key: string; label: string } => {
     if (!datum) {
       return { key: "ohne-datum", label: "Ohne Datum" };
@@ -324,10 +312,12 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
         ? "Spiele ohne Datum"
         : `Spiele Monat ${label}`;
 
+    const monthDueDate = key === "ohne-datum" ? "" : `${key}-01`;
+
     jiraRows.push({
       Summary: summary,
       Description: "",
-      "Due Date": "",
+      "Due Date": monthDueDate,
       "Issue Type": "Task",
       Status: DEFAULT_STATUS,
       "Work item ID": id,
@@ -360,7 +350,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
       jiraRows.push({
         Summary: `Spiel: ${m.heim} vs ${m.gast}`,
         Description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
-        "Due Date": formatDueDate(m.datum),
+        "Due Date": "",
         "Issue Type": "Sub-task",
         Status: DEFAULT_STATUS,
         "Work item ID": id,

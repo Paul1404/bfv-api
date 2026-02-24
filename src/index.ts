@@ -206,18 +206,163 @@ function exportToICS(matches: ExportMatch[], filename: string) {
 }
 
 /**
- * Exports matches as a Jira-compatible CSV file for task import.
+ * Exports matches as a Jira-compatible CSV file for Jira import.
+ * Groups all games under monthly parent tasks like "Spiele Monat März 2025".
+ *
+ * Jira Cloud CSV import can establish hierarchy via:
+ * - "Work item ID": unique ID per row
+ * - "Parent": Work item ID of the parent row
+ * - "Issue Type": e.g. "Task" for parents, "Sub-task" for children
  */
 function exportToJiraCSV(matches: ExportMatch[], filename: string) {
-  // Jira expects columns like Summary, Description, Due Date, Issue Type
-  const jiraRows = matches.map(m => ({
-    Summary: `Match: ${m.heim} vs ${m.gast}`,
-    Description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
-    "Due Date": m.datum.split('.').reverse().join('-'), // Converts DD.MM.YYYY to YYYY-MM-DD
-    "Issue Type": "Task",
-  }));
+  if (!matches.length) {
+    const parser = new Json2CsvParser({
+      header: true,
+      fields: ["Summary", "Description", "Due Date", "Issue Type", "Work item ID", "Parent"],
+    });
+    const csvWithBom = "\uFEFF" + parser.parse([]);
+    writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
+    console.log(`✅ Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
+    return;
+  }
 
-  const parser = new Json2CsvParser({ header: true, fields: ["Summary", "Description", "Due Date", "Issue Type"] });
+  const MONTH_NAMES = [
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+  ];
+
+  const formatDueDate = (datum: string): string => {
+    if (!datum) return "";
+    const parts = datum.split(".");
+    if (parts.length !== 3) return "";
+    const [dayStr, monthStr, yearStr] = parts;
+    if (!dayStr || !monthStr || !yearStr) return "";
+    const day = dayStr.padStart(2, "0");
+    const month = monthStr.padStart(2, "0");
+    const year = yearStr;
+    return `${year}-${month}-${day}`;
+  };
+
+  const getMonthKeyAndLabel = (datum: string): { key: string; label: string } => {
+    if (!datum) {
+      return { key: "ohne-datum", label: "Ohne Datum" };
+    }
+    const parts = datum.split(".");
+    if (parts.length !== 3) {
+      return { key: "ohne-datum", label: "Ohne Datum" };
+    }
+    const [, monthStr, yearStr] = parts;
+    const month = Number(monthStr);
+    const year = Number(yearStr);
+    if (!month || month < 1 || month > 12 || !year) {
+      return { key: "ohne-datum", label: "Ohne Datum" };
+    }
+    const key = `${yearStr}-${monthStr.padStart(2, "0")}`;
+    const monthName = MONTH_NAMES[month - 1];
+    const label = `${monthName} ${year}`;
+    return { key, label };
+  };
+
+  // Group matches by month (year + month), keeping German month labels
+  const groups = new Map<string, { label: string; matches: ExportMatch[] }>();
+  for (const m of matches) {
+    const { key, label } = getMonthKeyAndLabel(m.datum);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.matches.push(m);
+    } else {
+      groups.set(key, { label, matches: [m] });
+    }
+  }
+
+  // Sort months chronologically, "ohne-datum" (no date) at the end
+  const monthEntries = Array.from(groups.entries());
+  monthEntries.sort(([keyA], [keyB]) => {
+    if (keyA === "ohne-datum" && keyB === "ohne-datum") return 0;
+    if (keyA === "ohne-datum") return 1;
+    if (keyB === "ohne-datum") return -1;
+    return keyA.localeCompare(keyB);
+  });
+
+  // Assign Work item IDs: first months, then games
+  let nextId = 1;
+  const monthIdByKey = new Map<string, number>();
+  const jiraRows: {
+    Summary: string;
+    Description: string;
+    "Due Date": string;
+    "Issue Type": string;
+    "Work item ID": number;
+    Parent: number | "" ;
+  }[] = [];
+
+  // Parent rows: one per month (e.g. "Spiele Monat März 2025")
+  for (const [key, { label }] of monthEntries) {
+    const id = nextId++;
+    monthIdByKey.set(key, id);
+
+    const summary =
+      key === "ohne-datum"
+        ? "Spiele ohne Datum"
+        : `Spiele Monat ${label}`;
+
+    jiraRows.push({
+      Summary: summary,
+      Description: "",
+      "Due Date": "",
+      "Issue Type": "Task",
+      "Work item ID": id,
+      Parent: "",
+    });
+  }
+
+  // Helper to compare matches by date/time for stable ordering
+  const compareMatchesByDateTime = (a: ExportMatch, b: ExportMatch): number => {
+    const [ya, ma, da, ha, mina] = parseDateTime(a.datum, a.uhrzeit);
+    const [yb, mb, db, hb, minb] = parseDateTime(b.datum, b.uhrzeit);
+    if (ya !== yb) return ya - yb;
+    if (ma !== mb) return ma - mb;
+    if (da !== db) return da - db;
+    if (ha !== hb) return ha - hb;
+    return mina - minb;
+  };
+
+  // Child rows: each game as a Sub-task under the corresponding month
+  for (const [key, { matches: monthMatches }] of monthEntries) {
+    const parentId = monthIdByKey.get(key);
+    if (!parentId) {
+      continue;
+    }
+
+    const sortedMatches = [...monthMatches].sort(compareMatchesByDateTime);
+
+    for (const m of sortedMatches) {
+      const id = nextId++;
+      jiraRows.push({
+        Summary: `Spiel: ${m.heim} vs ${m.gast}`,
+        Description: `Wettbewerb: ${m.wettbewerb}\nTyp: ${m.wettbewerbstyp}\nErgebnis: ${m.ergebnis}`,
+        "Due Date": formatDueDate(m.datum),
+        "Issue Type": "Sub-task",
+        "Work item ID": id,
+        Parent: parentId,
+      });
+    }
+  }
+
+  const parser = new Json2CsvParser({
+    header: true,
+    fields: ["Summary", "Description", "Due Date", "Issue Type", "Work item ID", "Parent"],
+  });
   const csv = parser.parse(jiraRows);
   const csvWithBom = "\uFEFF" + csv;
   writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");

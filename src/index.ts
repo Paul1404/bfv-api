@@ -215,7 +215,7 @@ function exportToICS(matches: ExportMatch[], filename: string) {
  * - "Issue Type": e.g. "Task" for parents, "Sub-task" for children
  */
 function exportToJiraCSV(matches: ExportMatch[], filename: string) {
-  const DEFAULT_STATUS = "To Do";
+  const DEFAULT_STATUS = "In Progress";
 
   if (!matches.length) {
     const parser = new Json2CsvParser({

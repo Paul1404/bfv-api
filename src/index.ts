@@ -481,15 +481,23 @@ function getLatestFiles(dir: string, ext: string, count: number): { name: string
  * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
  */
 function generateFancyIndexHtml(dir: string) {
-  const csvByTeam = getFilesByTypeAndTeam(dir, ".csv");
+  const allCsvByTeam = getFilesByTypeAndTeam(dir, ".csv");
   const xlsxByTeam = getFilesByTypeAndTeam(dir, ".xlsx");
   const icsByTeam = getFilesByTypeAndTeam(dir, ".ics");
 
+  // CSV: only match data (exclude Jira import files)
+  const csvByTeam: Record<string, ExportFile[]> = {};
+  for (const team in allCsvByTeam) {
+    if (allCsvByTeam[team]) {
+      csvByTeam[team] = allCsvByTeam[team]!.filter(f => !f.name.startsWith("Jira_"));
+    }
+  }
+
   // Jira CSV: only files starting with Jira_
-  const jiraCsvByTeam = getFilesByTypeAndTeam(dir, ".csv");
-  for (const team in jiraCsvByTeam) {
-    if (jiraCsvByTeam[team]) {
-      jiraCsvByTeam[team] = jiraCsvByTeam[team]!.filter(f => f.name.startsWith("Jira_"));
+  const jiraCsvByTeam: Record<string, ExportFile[]> = {};
+  for (const team in allCsvByTeam) {
+    if (allCsvByTeam[team]) {
+      jiraCsvByTeam[team] = allCsvByTeam[team]!.filter(f => f.name.startsWith("Jira_"));
     }
   }
 

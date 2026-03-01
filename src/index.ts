@@ -6,6 +6,7 @@ import type { EventAttributes } from "ics";
 type ExportFile = { name: string; mtime: number; size: number };
 import {
   writeFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -426,7 +427,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
     cell.fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FF0070C0" }, // blue
+      fgColor: { argb: "FFFA0102" }, // SVU red
     };
     cell.alignment = { vertical: "middle", horizontal: "center" };
     cell.border = {
@@ -445,7 +446,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
         cell.fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: "FFE6F0FA" }, // light blue
+          fgColor: { argb: "FFFFE5E5" }, // light red
         };
       });
     }
@@ -496,43 +497,167 @@ function generateFancyIndexHtml(dir: string) {
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>BFV Exports</title>
+  <title>Spielplan – Sportverein 1945 Untereuerheim e.V.</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Spielplan und Exporte der SG Gädheim/Untereuerheim – Sportverein 1945 Untereuerheim e.V.">
+  <link rel="icon" href="Logo.png" type="image/png">
   <meta http-equiv="refresh" content="300">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 2em; background: #f4f8fb; }
-    h1 { color: #0070C0; }
-    h2 { margin-top: 2em; color: #005080; }
-    h3 { margin-top: 1.2em; color: #333; }
-    .table-responsive { overflow-x: auto; width: 100%; display: block; }
-    table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 2px 8px #0001; min-width: 600px; }
-    th, td { padding: 0.7em 1em; }
-    th { background: #0070C0; color: #fff; text-align: left; }
-    tr:nth-child(even) { background: #e6f0fa; }
-    tr:hover { background: #d0e6f7; }
-    a { color: #0070C0; text-decoration: none; }
+    :root {
+      --svu-red: #FA0102;
+      --svu-red-dark: #c80102;
+      --svu-red-light: #ff4d4e;
+      --svu-bg: #0d0d0d;
+      --svu-card: #1a1a1a;
+      --svu-text: #f5f5f5;
+      --svu-muted: #a3a3a3;
+      --svu-border: #2a2a2a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: var(--svu-bg);
+      color: var(--svu-text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .header {
+      background: linear-gradient(135deg, var(--svu-red) 0%, var(--svu-red-dark) 100%);
+      padding: 2rem 1.5rem;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(250, 1, 2, 0.3);
+    }
+    .header-inner {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.3));
+    }
+    .header-text h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .header-text .tagline {
+      margin: 0.25rem 0 0;
+      font-size: 1rem;
+      opacity: 0.95;
+      font-weight: 500;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+    .intro {
+      background: var(--svu-card);
+      border: 1px solid var(--svu-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+      color: var(--svu-muted);
+    }
+    .intro a { color: var(--svu-red-light); text-decoration: none; }
+    .intro a:hover { text-decoration: underline; }
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 2.5rem 0 1rem;
+      color: var(--svu-text);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 500;
+      margin: 1.25rem 0 0.5rem;
+      color: var(--svu-muted);
+    }
+    .table-responsive {
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid var(--svu-border);
+      background: var(--svu-card);
+      margin-bottom: 1rem;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 500px;
+    }
+    th, td { padding: 0.85rem 1rem; text-align: left; }
+    th {
+      background: var(--svu-red);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+    tr { border-bottom: 1px solid var(--svu-border); }
+    tr:last-child { border-bottom: none; }
+    tr:hover { background: rgba(250, 1, 2, 0.06); }
+    a {
+      color: var(--svu-red-light);
+      text-decoration: none;
+      font-weight: 500;
+    }
     a:hover { text-decoration: underline; }
-    .footer { margin-top: 2em; color: #888; font-size: 0.95em; }
+    .footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--svu-border);
+      color: var(--svu-muted);
+      font-size: 0.875rem;
+    }
+    .footer a { color: var(--svu-red-light); }
     @media (max-width: 600px) {
-      .table-responsive { overflow-x: auto; width: 100%; display: block; }
-      table { min-width: 600px; }
-      th, td { padding: 0.5em 0.5em; }
-      tr { margin-bottom: 1em; }
+      .header-inner { flex-direction: column; }
+      .header-text h1 { font-size: 1.4rem; }
+      th, td { padding: 0.6rem 0.75rem; }
     }
   </style>
 </head>
 <body>
-  <h1>BFV Exports</h1>
-  <p>Hier finden Sie die neuesten Exportdateien (CSV, Excel, ICS, Jira) zum Download.<br>
-  Die Seite aktualisiert sich automatisch alle 5 Minuten.</p>
-  ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
-  ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
-  ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
-  ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", "📝")}
-  <div class="footer">
-    Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
-    <a href="https://github.com/Paul1404/bfv-api" target="_blank">Projekt auf GitHub</a>
-  </div>
+  <header class="header">
+    <div class="header-inner">
+      <img src="Logo.png" alt="Sportverein 1945 Untereuerheim" class="logo">
+      <div class="header-text">
+        <h1>Sportverein 1945 Untereuerheim e.V.</h1>
+        <p class="tagline">Wir sind Untereuerheim – Spielplan & Exporte</p>
+      </div>
+    </div>
+  </header>
+  <main class="container">
+    <p class="intro">
+      Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
+      Die Seite aktualisiert sich automatisch alle 5 Minuten.
+      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">→ Zum Verein</a>
+    </p>
+    ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
+    ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
+    ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
+    ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", "📝")}
+    <div class="footer">
+      Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
+      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">Sportverein 1945 Untereuerheim e.V.</a> · Triebweg 9 · 97508 Grettstadt/Untereuerheim
+    </div>
+  </main>
   <script>
     setTimeout(() => window.location.reload(), 300000);
   </script>
@@ -616,6 +741,13 @@ async function main() {
   // Export combined Jira CSV for all teams
   const jiraCsvNameAll = `Jira_Spiele_Alle_Teams_${timestamp}.csv`;
   exportToJiraCSV(allMatches, jiraCsvNameAll);
+
+  // Copy club logo to exports for favicon and header
+  const logoSrc = path.join(process.cwd(), "src", "Logo.png");
+  if (existsSync(logoSrc)) {
+    copyFileSync(logoSrc, path.join(EXPORT_DIR, "Logo.png"));
+    console.log("✅ Logo kopiert");
+  }
 
   // Generate the HTML index page
   generateFancyIndexHtml(EXPORT_DIR);

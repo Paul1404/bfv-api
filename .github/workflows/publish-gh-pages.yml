@@ -52,7 +52,7 @@ jobs:
           node dist/index.js
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ./exports
 

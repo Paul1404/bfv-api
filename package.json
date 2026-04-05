@@ -21,7 +21,7 @@
     "json2csv": "6.0.0-alpha.2"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.5.2",
     "typescript": "^6.0.2"
   }
 }

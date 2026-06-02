@@ -25,6 +25,15 @@ const TEAMS = [
 // Output directory for all exports and HTML
 const EXPORT_DIR = "./exports";
 
+// Public site URL (used to build calendar subscription links). No trailing slash.
+const SITE_URL = "https://sg-spielplan.untereuerheim.com";
+
+// Calendar clients subscribe via webcal://, which maps 1:1 to the https URL.
+const WEBCAL_BASE = SITE_URL.replace(/^https?:\/\//, "webcal://");
+
+// How many times to retry a failing BFV API call before giving up.
+const FETCH_ATTEMPTS = 4;
+
 // === TYPES ===
 
 // Structure of a row in the CSV/XLSX export (Match-ID removed)
@@ -41,6 +50,8 @@ interface ExportMatch {
 }
 
 // === UTILS ===
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Helper to parse German date/time (DD.MM.YYYY, HH:mm) to [YYYY, M, D, H, M]
@@ -66,8 +77,9 @@ function getFilesByTypeAndTeam(dir: string, ext: string): Record<string, ExportF
 
   const byTeam: Record<string, ExportFile[]> = {};
   for (const file of files) {
-    const match = file.name.match(/^((Jira_)?Spiele)_(.+)_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\./);
-    const team = match && match[3] ? match[3] : "Unbekannt";
+    // Stable names: "Spiele_<Team>.csv" or "Jira_Spiele_<Team>.csv"
+    const match = file.name.match(/^(?:Jira_)?Spiele_(.+)\.[a-z0-9]+$/i);
+    const team = match && match[1] ? match[1] : "Unbekannt";
     if (!byTeam[team]) byTeam[team] = [];
     byTeam[team].push(file);
   }
@@ -117,33 +129,45 @@ function sectionHtml(title: string, byTeam: Record<string, ExportFile[]>, ext: s
 }
 
 /**
+ * Builds the "subscribe to calendar" section with stable webcal:// links.
+ * Subscribing once keeps the calendar updated automatically on every run.
+ */
+function calendarSubscribeHtml(byTeam: Record<string, ExportFile[]>) {
+  const rows = Object.entries(byTeam)
+    .flatMap(([team, files]) =>
+      files.map((f) => {
+        const webcal = `${WEBCAL_BASE}/${f.name}`;
+        return `
+        <li class="sub-item">
+          <span class="sub-name">${team.replace(/_/g, " ")}</span>
+          <span class="sub-actions">
+            <a class="btn" href="${webcal}">In Kalender abonnieren</a>
+            <a href="${f.name}" download>Datei laden</a>
+          </span>
+        </li>`;
+      })
+    )
+    .join("\n");
+
+  return `
+    <h2>📅 Kalender abonnieren</h2>
+    <p class="hint">
+      Einmal abonnieren und die Termine aktualisieren sich automatisch. Funktioniert mit
+      Google Kalender, Apple Kalender und Outlook.
+    </p>
+    <ul class="sub-list">
+      ${rows}
+    </ul>
+  `;
+}
+
+/**
  * Ensures the export directory exists.
  */
 function ensureExportDir() {
   if (!existsSync(EXPORT_DIR)) {
     mkdirSync(EXPORT_DIR);
   }
-}
-
-/**
- * Returns a timestamp string for filenames, e.g. 2025-08-02_14-30-00
- */
-function getTimestamp(): string {
-  const now = new Date();
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return (
-    now.getFullYear() +
-    "-" +
-    pad(now.getMonth() + 1) +
-    "-" +
-    pad(now.getDate()) +
-    "_" +
-    pad(now.getHours()) +
-    "-" +
-    pad(now.getMinutes()) +
-    "-" +
-    pad(now.getSeconds())
-  );
 }
 
 /**
@@ -156,6 +180,15 @@ function sanitizeFilename(name: string): string {
     .replace(/ü/g, "ue")
     .replace(/ß/g, "ss")
     .replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/**
+ * Builds a stable, content-derived UID for an ICS event so calendar clients
+ * keep the same event across runs instead of creating duplicates.
+ */
+function eventUid(m: ExportMatch): string {
+  const slug = sanitizeFilename(`${m.datum}_${m.uhrzeit}_${m.heim}_vs_${m.gast}`);
+  return `${slug}@sg-spielplan.untereuerheim.com`;
 }
 
 /**
@@ -181,6 +214,30 @@ function humanFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+/**
+ * Fetches a team's matches with retries and exponential backoff.
+ * Throws after the final attempt so the caller can abort the run and keep
+ * the last successful deployment live instead of publishing empty data.
+ */
+async function fetchTeamMatches(team: { id: string; name: string }) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    try {
+      const { data } = await bfvApi.listMatches({ params: { teamPermanentId: team.id } });
+      return data;
+    } catch (error) {
+      lastError = error;
+      const backoff = 2000 * 2 ** (attempt - 1);
+      console.warn(
+        `⚠️  Abruf für ${team.name} fehlgeschlagen (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
+          (attempt < FETCH_ATTEMPTS ? ` Neuer Versuch in ${backoff / 1000}s.` : "")
+      );
+      if (attempt < FETCH_ATTEMPTS) await sleep(backoff);
+    }
+  }
+  throw lastError;
+}
+
 // === EXPORT FUNCTIONS ===
 
 /**
@@ -188,8 +245,9 @@ function humanFileSize(bytes: number): string {
  */
 function exportToICS(matches: ExportMatch[], filename: string) {
   const events: EventAttributes[] = matches
-    .filter(m => m.datum && m.uhrzeit)
-    .map(m => ({
+    .filter((m) => m.datum && m.uhrzeit)
+    .map((m) => ({
+      uid: eventUid(m),
       title: `${m.heim} vs ${m.gast}`,
       start: parseDateTime(m.datum, m.uhrzeit),
       duration: { hours: 2 }, // Required by ics
@@ -224,7 +282,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
       header: true,
       fields: ["Summary", "Description", "Due Date", "Issue Type", "Status", "Work item ID", "Parent"],
     });
-    const csvWithBom = "\uFEFF" + parser.parse([]);
+    const csvWithBom = "﻿" + parser.parse([]);
     writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
     console.log(`✅ Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
     return;
@@ -365,7 +423,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     fields: ["Summary", "Description", "Due Date", "Issue Type", "Status", "Work item ID", "Parent"],
   });
   const csv = parser.parse(jiraRows);
-  const csvWithBom = "\uFEFF" + csv;
+  const csvWithBom = "﻿" + csv;
   writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
   console.log(`✅ Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
 }
@@ -379,11 +437,8 @@ function exportToCSV(matches: ExportMatch[], filename: string) {
   const csvPath = path.join(EXPORT_DIR, filename);
 
   // Write UTF-8 BOM for Excel compatibility with umlauts
-  const csvWithBom = "\uFEFF" + csv;
+  const csvWithBom = "﻿" + csv;
 
-  if (existsSync(csvPath)) {
-    console.warn(`⚠️  Datei ${csvPath} existiert bereits und wird überschrieben.`);
-  }
   writeFileSync(csvPath, csvWithBom, "utf8");
   console.log(`✅ CSV exportiert: ${csvPath}`);
 }
@@ -454,28 +509,11 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 
   const xlsxPath = path.join(EXPORT_DIR, filename);
 
-  if (existsSync(xlsxPath)) {
-    console.warn(`⚠️  Datei ${xlsxPath} existiert bereits und wird überschrieben.`);
-  }
   await workbook.xlsx.writeFile(xlsxPath);
   console.log(`✅ XLSX exportiert: ${xlsxPath}`);
 }
 
 // === HTML GENERATION ===
-
-/**
- * Returns the latest files with a given extension, sorted by modification time.
- */
-function getLatestFiles(dir: string, ext: string, count: number): { name: string; mtime: number; size: number }[] {
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(ext))
-    .map((f) => {
-      const stats = statSync(path.join(dir, f));
-      return { name: f, mtime: stats.mtimeMs, size: stats.size };
-    })
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, count);
-}
 
 /**
  * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
@@ -598,6 +636,42 @@ function generateFancyIndexHtml(dir: string) {
       margin: 1.25rem 0 0.5rem;
       color: var(--svu-muted);
     }
+    .hint {
+      color: var(--svu-muted);
+      font-size: 0.9rem;
+      margin: 0 0 1rem;
+    }
+    .sub-list {
+      list-style: none;
+      margin: 0 0 1rem;
+      padding: 0;
+      display: grid;
+      gap: 0.75rem;
+    }
+    .sub-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      background: var(--svu-card);
+      border: 1px solid var(--svu-border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+    }
+    .sub-name { font-weight: 500; }
+    .sub-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      background: var(--svu-red);
+      color: #fff !important;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.875rem;
+      text-decoration: none !important;
+    }
+    .btn:hover { background: var(--svu-red-dark); }
     .table-responsive {
       overflow-x: auto;
       border-radius: 10px;
@@ -654,9 +728,11 @@ function generateFancyIndexHtml(dir: string) {
   <main class="container">
     <p class="intro">
       Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
+      Die Dateinamen bleiben stabil, ein Lesezeichen oder Kalender-Abo funktioniert also dauerhaft.
       Die Seite aktualisiert sich automatisch alle 5 Minuten.
       <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">→ Zum Verein</a>
     </p>
+    ${calendarSubscribeHtml(icsByTeam)}
     ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
     ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
     ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
@@ -685,70 +761,46 @@ function generateFancyIndexHtml(dir: string) {
 async function main() {
   console.log("Spiele werden abgerufen...");
   ensureExportDir();
-  const timestamp = getTimestamp();
 
   // Collect all matches for combined export
   let allMatches: ExportMatch[] = [];
 
-  // Export per-team files
+  // Export per-team files. A failed fetch (after retries) aborts the whole run
+  // so the previous, good GitHub Pages deployment stays live.
   for (const team of TEAMS) {
-    try {
-      // Fetch matches for this team
-      const { data } = await bfvApi.listMatches({ params: { teamPermanentId: team.id } });
-      // Map API data to export format (without Match-ID)
-      const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
-        mannschaft: data.team.name,
-        wettbewerb: match.competitionName,
-        wettbewerbstyp: match.competitionType,
-        datum: formatDate(match.kickoffDate),
-        uhrzeit: formatTime(match.kickoffTime),
-        heim: match.homeTeamName,
-        gast: match.guestTeamName,
-        ergebnis: match.result ?? "",
-        vorabVeröffentlicht: match.prePublished ? "Ja" : "Nein",
-      }));
+    const data = await fetchTeamMatches(team);
 
-      // Add to combined list
-      allMatches = allMatches.concat(teamMatches);
+    // Map API data to export format (without Match-ID)
+    const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
+      mannschaft: data.team.name,
+      wettbewerb: match.competitionName,
+      wettbewerbstyp: match.competitionType,
+      datum: formatDate(match.kickoffDate),
+      uhrzeit: formatTime(match.kickoffTime),
+      heim: match.homeTeamName,
+      gast: match.guestTeamName,
+      ergebnis: match.result ?? "",
+      vorabVeröffentlicht: match.prePublished ? "Ja" : "Nein",
+    }));
 
-      // Sanitize team name for filenames
-      const sanitized = sanitizeFilename(team.name);
+    // Add to combined list
+    allMatches = allMatches.concat(teamMatches);
 
-      // Export per-team CSV and XLSX
-      const csvName = `Spiele_${sanitized}_${timestamp}.csv`;
-      const xlsxName = `Spiele_${sanitized}_${timestamp}.xlsx`;
-      exportToCSV(teamMatches, csvName);
-      await exportToXLSX(teamMatches, xlsxName);
+    // Sanitize team name for filenames
+    const sanitized = sanitizeFilename(team.name);
 
-      // Export per-team ICS
-      const icsName = `Spiele_${sanitized}_${timestamp}.ics`;
-      exportToICS(teamMatches, icsName);
-
-      // Export per-team Jira CSV
-      const jiraCsvName = `Jira_Spiele_${sanitized}_${timestamp}.csv`;
-      exportToJiraCSV(teamMatches, jiraCsvName);
-
-    } catch (error) {
-      console.error(
-        `❌ Fehler beim Abrufen der Spiele für Team ${team.name}:`,
-        error
-      );
-    }
+    // Stable filenames (no timestamp) so links and calendar subscriptions persist
+    exportToCSV(teamMatches, `Spiele_${sanitized}.csv`);
+    await exportToXLSX(teamMatches, `Spiele_${sanitized}.xlsx`);
+    exportToICS(teamMatches, `Spiele_${sanitized}.ics`);
+    exportToJiraCSV(teamMatches, `Jira_Spiele_${sanitized}.csv`);
   }
 
-  // Export combined CSV and XLSX for all teams
-  const csvNameAll = `Spiele_Alle_Teams_${timestamp}.csv`;
-  const xlsxNameAll = `Spiele_Alle_Teams_${timestamp}.xlsx`;
-  exportToCSV(allMatches, csvNameAll);
-  await exportToXLSX(allMatches, xlsxNameAll);
-
-  // Export combined ICS for all teams
-  const icsNameAll = `Spiele_Alle_Teams_${timestamp}.ics`;
-  exportToICS(allMatches, icsNameAll);
-
-  // Export combined Jira CSV for all teams
-  const jiraCsvNameAll = `Jira_Spiele_Alle_Teams_${timestamp}.csv`;
-  exportToJiraCSV(allMatches, jiraCsvNameAll);
+  // Combined exports for all teams (stable names)
+  exportToCSV(allMatches, "Spiele_Alle_Teams.csv");
+  await exportToXLSX(allMatches, "Spiele_Alle_Teams.xlsx");
+  exportToICS(allMatches, "Spiele_Alle_Teams.ics");
+  exportToJiraCSV(allMatches, "Jira_Spiele_Alle_Teams.csv");
 
   // Copy club logo to exports for favicon and header
   const logoSrc = path.join(process.cwd(), "src", "Logo.png");

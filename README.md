@@ -9,13 +9,15 @@
 ## 🚀 Features
 
 - Fetches all matches for one or more BFV teams via the [bfv-api-js](https://github.com/SebastianSiedler/bfv-api-js) client
-- Exports each team's matches as **CSV** and **XLSX** (Excel) with German column names
+- Exports each team's matches as **CSV**, **XLSX** (Excel), **ICS** (calendar), and **Jira CSV**, with German column names
 - Exports a combined file for all teams
-- All files timestamped and named in German (umlauts handled)
-- Generates a modern, responsive `index.html` for easy download
+- **Stable file names** (no timestamps), so download links and calendar subscriptions keep working forever
+- Subscribe-once calendar feeds via `webcal://` with stable event IDs (no duplicate events)
+- Generates a modern, responsive `index.html` for easy download and one-click calendar subscription
 - Publishes all exports to **GitHub Pages** via Actions (no gh-pages branch needed)
 - Fully automated: runs on push, manual trigger, or nightly via cron
-- Secure: no vulnerable dependencies, only safe libraries for writing files
+- Resilient: retries the BFV API with backoff, and aborts the run on failure so the last good site stays online
+- Hands-off dependencies: Dependabot patch/minor updates auto-merge once CI passes
 
 ---
 
@@ -51,16 +53,34 @@ node dist/index.js
 
 ## 📂 Output
 
-- **Per-team:**  
-  - `Spiele_<Teamname>_<timestamp>.csv`
-  - `Spiele_<Teamname>_<timestamp>.xlsx`
-- **Combined:**  
-  - `Spiele_Alle_Teams_<timestamp>.csv`
-  - `Spiele_Alle_Teams_<timestamp>.xlsx`
-- **index.html:**  
-  - Lists and links all files, with file size and last update
+File names are stable (no timestamps), so a bookmark or calendar subscription set once keeps working.
+
+- **Per-team:**
+  - `Spiele_<Teamname>.csv`
+  - `Spiele_<Teamname>.xlsx`
+  - `Spiele_<Teamname>.ics`
+  - `Jira_Spiele_<Teamname>.csv`
+- **Combined:**
+  - `Spiele_Alle_Teams.csv`
+  - `Spiele_Alle_Teams.xlsx`
+  - `Spiele_Alle_Teams.ics`
+  - `Jira_Spiele_Alle_Teams.csv`
+- **index.html:**
+  - Lists and links all files, with file size and last update, plus one-click calendar subscription
 
 All files are UTF-8 encoded and Excel-compatible (CSV includes BOM for umlauts).
+
+---
+
+## 📅 Calendar subscription
+
+Subscribe once and the calendar updates itself on every run. In Google Calendar, Apple Calendar, or Outlook, add a calendar "from URL":
+
+```
+https://sg-spielplan.untereuerheim.com/Spiele_Alle_Teams.ics
+```
+
+Per-team feeds use the same pattern, e.g. `Spiele_Gaedheim-Untereuerheim.ics`. The site also offers `webcal://` buttons that open directly in the calendar app.
 
 ---
 
@@ -68,6 +88,20 @@ All files are UTF-8 encoded and Excel-compatible (CSV includes BOM for umlauts).
 
 Latest exports and downloads:  
 👉 [https://sg-spielplan.untereuerheim.com/](https://sg-spielplan.untereuerheim.com/)
+
+---
+
+## 🔧 Maintenance (basically none)
+
+The goal is set-and-forget. Two things keep it running on its own:
+
+- **Resilience:** if the BFV API is down, the run retries with backoff and then fails. A failed run does not deploy, so the previous good site stays online until the next nightly run succeeds.
+- **Dependencies:** Dependabot opens update PRs, CI (`ci.yml`) builds them, and `dependabot-auto-merge.yml` auto-merges patch and minor updates. Major updates wait for a human.
+
+One-time repo settings for auto-merge to work:
+
+1. Settings → General → enable **Allow auto-merge**.
+2. Settings → Branches → protect `main` and mark the **CI / build** check as required, so nothing merges before the build passes.
 
 ---
 
@@ -99,7 +133,7 @@ MIT License
 A: Edit the `TEAMS` array in `src/index.ts` with the desired team IDs and names.
 
 **Q: How do I change the export schedule?**  
-A: Edit the `cron` line in `.github/workflows/publish-pages.yml`.
+A: Edit the `cron` line in `.github/workflows/publish-gh-pages.yml`.
 
 **Q: Can I use this for other football associations?**  
 A: This tool is tailored for the BFV API, but can be adapted for similar APIs.

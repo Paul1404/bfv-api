@@ -93,10 +93,11 @@ Latest exports and downloads:
 
 ## 🔧 Maintenance (basically none)
 
-The goal is set-and-forget. Two things keep it running on its own:
+The goal is set-and-forget. Three things keep it running on its own:
 
 - **Resilience:** if the BFV API is down, the run retries with backoff and then fails. A failed run does not deploy, so the previous good site stays online until the next nightly run succeeds.
-- **Dependencies:** Dependabot opens update PRs, CI (`ci.yml`) builds them, and `dependabot-auto-merge.yml` auto-merges patch and minor updates. Major updates wait for a human.
+- **Dependencies:** Dependabot batches patch and minor updates into one weekly PR per ecosystem, CI (`ci.yml`) builds them, and `dependabot-auto-merge.yml` auto-merges them. Major updates come as individual PRs and wait for a human.
+- **Alerting:** a failed run opens (or comments on) a single tracking issue labelled `deploy-failure`, and the next successful run closes it automatically. The repo only asks for attention when a run actually breaks.
 
 One-time repo settings for auto-merge to work:
 

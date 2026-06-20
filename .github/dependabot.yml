@@ -7,6 +7,13 @@ updates:
       day: "sunday"
       time: "08:00"
       timezone: "Europe/Berlin"
+    # Batch all non-major bumps into a single weekly PR to cut down on noise.
+    # Major updates still come as individual PRs so a human can review them.
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "devcontainers"
     directory: "/.devcontainer"
@@ -15,6 +22,11 @@ updates:
       day: "sunday"
       time: "08:00"
       timezone: "Europe/Berlin"
+    groups:
+      devcontainers-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -23,3 +35,8 @@ updates:
       day: "sunday"
       time: "08:00"
       timezone: "Europe/Berlin"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

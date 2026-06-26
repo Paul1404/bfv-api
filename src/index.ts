@@ -171,6 +171,16 @@ function ensureExportDir() {
 }
 
 /**
+ * Formats a BFV season id into a human-readable label.
+ * The API returns ids like "2526", which means the 2025/26 season.
+ */
+function formatSeason(seasonId: string): string {
+  const match = seasonId.match(/^(\d{2})(\d{2})$/);
+  if (!match) return seasonId;
+  return `20${match[1]}/${match[2]}`;
+}
+
+/**
  * Sanitizes a string for use in filenames (umlauts, spaces, special chars)
  */
 function sanitizeFilename(name: string): string {
@@ -266,7 +276,7 @@ function exportToICS(matches: ExportMatch[], filename: string) {
 
 /**
  * Exports matches as a Jira-compatible CSV file for Jira import.
- * Groups all games under monthly parent tasks like "Spiele Monat März 2025".
+ * Groups all games under monthly parent tasks like "Spiele Monat März 2026".
  *
  * Jira Cloud CSV import can establish hierarchy via:
  * - "Work item ID": unique ID per row
@@ -361,7 +371,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     Parent: number | string | "" ;
   }[] = [];
 
-  // Parent rows: one per month (e.g. "Spiele Monat März 2025")
+  // Parent rows: one per month (e.g. "Spiele Monat März 2026")
   for (const [key, { label }] of monthEntries) {
     const id = nextId++;
     monthIdByKey.set(key, id);
@@ -518,7 +528,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 /**
  * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
  */
-function generateFancyIndexHtml(dir: string) {
+function generateFancyIndexHtml(dir: string, seasonLabel: string) {
   const allCsvByTeam = getFilesByTypeAndTeam(dir, ".csv");
   const xlsxByTeam = getFilesByTypeAndTeam(dir, ".xlsx");
   const icsByTeam = getFilesByTypeAndTeam(dir, ".ics");
@@ -727,7 +737,7 @@ function generateFancyIndexHtml(dir: string) {
   </header>
   <main class="container">
     <p class="intro">
-      Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
+      ${seasonLabel ? `<strong>Saison ${seasonLabel}.</strong> ` : ""}Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
       Die Dateinamen bleiben stabil, ein Lesezeichen oder Kalender-Abo funktioniert also dauerhaft.
       Die Seite aktualisiert sich automatisch alle 5 Minuten.
       <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">→ Zum Verein</a>
@@ -765,10 +775,19 @@ async function main() {
   // Collect all matches for combined export
   let allMatches: ExportMatch[] = [];
 
+  // Track which BFV season(s) the configured team ids resolve to. A team's
+  // permanentId is bound to one season, so this is how a maintainer can tell
+  // at a glance whether the ids still point at the current season.
+  const seasonIds = new Set<string>();
+
   // Export per-team files. A failed fetch (after retries) aborts the whole run
   // so the previous, good GitHub Pages deployment stays live.
   for (const team of TEAMS) {
     const data = await fetchTeamMatches(team);
+
+    if (data.team?.seasonId) {
+      seasonIds.add(data.team.seasonId);
+    }
 
     // Map API data to export format (without Match-ID)
     const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
@@ -809,8 +828,14 @@ async function main() {
     console.log("✅ Logo kopiert");
   }
 
+  // Build a readable season label (usually one season across all teams)
+  const seasonLabel = Array.from(seasonIds).sort().map(formatSeason).join(", ");
+  if (seasonLabel) {
+    console.log(`Saison: ${seasonLabel}`);
+  }
+
   // Generate the HTML index page
-  generateFancyIndexHtml(EXPORT_DIR);
+  generateFancyIndexHtml(EXPORT_DIR, seasonLabel);
   console.log("Fertig! 🚀");
 }
 

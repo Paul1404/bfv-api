@@ -99,6 +99,16 @@ The goal is set-and-forget. Three things keep it running on its own:
 - **Dependencies:** Dependabot batches patch and minor updates into one weekly PR per ecosystem, CI (`ci.yml`) builds them, and `dependabot-auto-merge.yml` auto-merges them. Major updates come as individual PRs and wait for a human.
 - **Alerting:** a failed run opens (or comments on) a single tracking issue labelled `deploy-failure`, and the next successful run closes it automatically. The repo only asks for attention when a run actually breaks.
 
+### Once a year: the new season
+
+This is the only manual step. A BFV `teamPermanentId` is bound to a single season, so it does **not** roll over on its own. When the new season's fixtures are published (usually July), each team gets a fresh permanent id.
+
+1. Open each team's match-plan widget on [bfv.de](https://www.bfv.de) and copy the new `teamPermanentId` (the 32-character token in the widget URL).
+2. Replace the ids in the `TEAMS` array in `src/index.ts`.
+3. Commit and push. The next run picks up the new season automatically.
+
+The generated site shows the active season (e.g. "Saison 2025/26") at the top, and the build logs print `Saison: ...`, so you can confirm at a glance which season the ids currently resolve to.
+
 One-time repo settings for auto-merge to work:
 
 1. Settings → General → enable **Allow auto-merge**.
@@ -132,6 +142,9 @@ MIT License
 
 **Q: How do I add more teams?**  
 A: Edit the `TEAMS` array in `src/index.ts` with the desired team IDs and names.
+
+**Q: The site still shows last season. What do I do?**  
+A: Each `teamPermanentId` is tied to one season and does not advance by itself. Get the new season's permanent IDs from the BFV widget and update the `TEAMS` array. See "Once a year: the new season" above.
 
 **Q: How do I change the export schedule?**  
 A: Edit the `cron` line in `.github/workflows/publish-gh-pages.yml`.

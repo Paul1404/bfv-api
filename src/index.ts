@@ -54,6 +54,21 @@ interface ExportMatch {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Inline Lucide icons (https://lucide.dev) for the generated page.
+ * Kept as SVG strings so the static HTML has no runtime icon dependency.
+ */
+const lucideIcon = (paths: string, cls = "ico"): string =>
+  `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
+const ICONS = {
+  calendar: lucideIcon('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
+  csv: lucideIcon('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
+  xlsx: lucideIcon('<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>'),
+  jira: lucideIcon('<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>'),
+  arrowRight: lucideIcon('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>', "ico ico-sm"),
+};
+
+/**
  * Helper to parse German date/time (DD.MM.YYYY, HH:mm) to [YYYY, M, D, H, M]
  */
 function parseDateTime(date: string, time: string): [number, number, number, number, number] {
@@ -150,7 +165,7 @@ function calendarSubscribeHtml(byTeam: Record<string, ExportFile[]>) {
     .join("\n");
 
   return `
-    <h2>📅 Kalender abonnieren</h2>
+    <h2>${ICONS.calendar} Kalender abonnieren</h2>
     <p class="hint">
       Einmal abonnieren und die Termine aktualisieren sich automatisch. Funktioniert mit
       Google Kalender, Apple Kalender und Outlook.
@@ -239,7 +254,7 @@ async function fetchTeamMatches(team: { id: string; name: string }) {
       lastError = error;
       const backoff = 2000 * 2 ** (attempt - 1);
       console.warn(
-        `⚠️  Abruf für ${team.name} fehlgeschlagen (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
+        `Abruf für ${team.name} fehlgeschlagen (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
           (attempt < FETCH_ATTEMPTS ? ` Neuer Versuch in ${backoff / 1000}s.` : "")
       );
       if (attempt < FETCH_ATTEMPTS) await sleep(backoff);
@@ -270,7 +285,7 @@ function exportToICS(matches: ExportMatch[], filename: string) {
       return;
     }
     writeFileSync(path.join(EXPORT_DIR, filename), value, "utf8");
-    console.log(`✅ ICS exportiert: ${path.join(EXPORT_DIR, filename)}`);
+    console.log(`ICS exportiert: ${path.join(EXPORT_DIR, filename)}`);
   });
 }
 
@@ -294,7 +309,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     });
     const csvWithBom = "﻿" + parser.parse([]);
     writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
-    console.log(`✅ Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
+    console.log(`Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
     return;
   }
 
@@ -435,7 +450,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
   const csv = parser.parse(jiraRows);
   const csvWithBom = "﻿" + csv;
   writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
-  console.log(`✅ Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
+  console.log(`Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
 }
 
 /**
@@ -450,7 +465,7 @@ function exportToCSV(matches: ExportMatch[], filename: string) {
   const csvWithBom = "﻿" + csv;
 
   writeFileSync(csvPath, csvWithBom, "utf8");
-  console.log(`✅ CSV exportiert: ${csvPath}`);
+  console.log(`CSV exportiert: ${csvPath}`);
 }
 
 /**
@@ -520,7 +535,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
   const xlsxPath = path.join(EXPORT_DIR, filename);
 
   await workbook.xlsx.writeFile(xlsxPath);
-  console.log(`✅ XLSX exportiert: ${xlsxPath}`);
+  console.log(`XLSX exportiert: ${xlsxPath}`);
 }
 
 // === HTML GENERATION ===
@@ -553,9 +568,9 @@ function generateFancyIndexHtml(dir: string, seasonLabel: string) {
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Spielplan – Sportverein 1945 Untereuerheim e.V.</title>
+  <title>Spielplan des Sportvereins 1945 Untereuerheim e.V.</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spielplan und Exporte der SG Gädheim/Untereuerheim – Sportverein 1945 Untereuerheim e.V.">
+  <meta name="description" content="Spielplan und Exporte der SG Gädheim/Untereuerheim. Sportverein 1945 Untereuerheim e.V.">
   <link rel="icon" href="Logo.png" type="image/png">
   <meta http-equiv="refresh" content="300">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -640,6 +655,15 @@ function generateFancyIndexHtml(dir: string, seasonLabel: string) {
       align-items: center;
       gap: 0.5rem;
     }
+    .ico {
+      width: 1.25rem;
+      height: 1.25rem;
+      stroke: currentColor;
+      fill: none;
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+    .ico-sm { width: 1rem; height: 1rem; }
     h3 {
       font-size: 1rem;
       font-weight: 500;
@@ -731,7 +755,7 @@ function generateFancyIndexHtml(dir: string, seasonLabel: string) {
       <img src="Logo.png" alt="Sportverein 1945 Untereuerheim" class="logo">
       <div class="header-text">
         <h1>Sportverein 1945 Untereuerheim e.V.</h1>
-        <p class="tagline">Wir sind Untereuerheim – Spielplan & Exporte</p>
+        <p class="tagline">Wir sind Untereuerheim. Spielplan und Exporte.</p>
       </div>
     </div>
   </header>
@@ -740,13 +764,13 @@ function generateFancyIndexHtml(dir: string, seasonLabel: string) {
       ${seasonLabel ? `<strong>Saison ${seasonLabel}.</strong> ` : ""}Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
       Die Dateinamen bleiben stabil, ein Lesezeichen oder Kalender-Abo funktioniert also dauerhaft.
       Die Seite aktualisiert sich automatisch alle 5 Minuten.
-      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">→ Zum Verein</a>
+      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">Zum Verein ${ICONS.arrowRight}</a>
     </p>
     ${calendarSubscribeHtml(icsByTeam)}
-    ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
-    ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
-    ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
-    ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", "📝")}
+    ${sectionHtml("CSV", csvByTeam, ".csv", ICONS.csv)}
+    ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", ICONS.xlsx)}
+    ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", ICONS.calendar)}
+    ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", ICONS.jira)}
     <div class="footer">
       Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
       <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">Sportverein 1945 Untereuerheim e.V.</a> · Triebweg 9 · 97508 Grettstadt/Untereuerheim
@@ -760,7 +784,7 @@ function generateFancyIndexHtml(dir: string, seasonLabel: string) {
 `;
 
   writeFileSync(path.join(dir, "index.html"), html, "utf8");
-  console.log(`✅ index.html generiert: ${path.join(dir, "index.html")}`);
+  console.log(`index.html generiert: ${path.join(dir, "index.html")}`);
 }
 
 // === MAIN ===
@@ -825,7 +849,7 @@ async function main() {
   const logoSrc = path.join(process.cwd(), "src", "Logo.png");
   if (existsSync(logoSrc)) {
     copyFileSync(logoSrc, path.join(EXPORT_DIR, "Logo.png"));
-    console.log("✅ Logo kopiert");
+    console.log("Logo kopiert");
   }
 
   // Build a readable season label (usually one season across all teams)
@@ -836,7 +860,7 @@ async function main() {
 
   // Generate the HTML index page
   generateFancyIndexHtml(EXPORT_DIR, seasonLabel);
-  console.log("Fertig! 🚀");
+  console.log("Fertig!");
 }
 
 // Run the main function and handle fatal errors

@@ -16,10 +16,26 @@ import path from "path";
 
 // === CONFIGURATION ===
 
-// List of teams to export (add more as needed)
+// BFV club id. Unlike a team's match-plan id, this is permanent across seasons.
+// The per-team widget ids are resolved from the club page each run (see
+// resolveTeamIds), so a new season needs no manual id update.
+const CLUB_ID = "00ES8GNLA8000012VV0AG08LVUPGND5I";
+
+// Teams to export. `slug` is the team's BFV page slug, used to look up its
+// current widget id on the club page. `fallbackId` is the last known id and is
+// used only if that lookup fails, so a scrape issue or BFV outage never takes
+// the site down.
 const TEAMS = [
-  { id: "016PBQB78C000000VV0AG80NVV8OQVTB", name: "Gädheim-Untereuerheim" },
-  { id: "02IDHSKCTG000000VS5489B2VU2I8R4H", name: "Gädheim-Untereuerheim II" },
+  {
+    slug: "sg-1-gaedheim-untereuerheim",
+    name: "Gädheim-Untereuerheim",
+    fallbackId: "016PBQB78C000000VV0AG80NVV8OQVTB",
+  },
+  {
+    slug: "sg-2-gaedheim-untereuerheim-ii",
+    name: "Gädheim-Untereuerheim II",
+    fallbackId: "02IDHSKCTG000000VS5489B2VU2I8R4H",
+  },
 ];
 
 // Output directory for all exports and HTML
@@ -52,6 +68,21 @@ interface ExportMatch {
 // === UTILS ===
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Inline Lucide icons (https://lucide.dev) for the generated page.
+ * Kept as SVG strings so the static HTML has no runtime icon dependency.
+ */
+const lucideIcon = (paths: string, cls = "ico"): string =>
+  `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
+const ICONS = {
+  calendar: lucideIcon('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
+  csv: lucideIcon('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
+  xlsx: lucideIcon('<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/>'),
+  jira: lucideIcon('<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>'),
+  arrowRight: lucideIcon('<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>', "ico ico-sm"),
+};
 
 /**
  * Helper to parse German date/time (DD.MM.YYYY, HH:mm) to [YYYY, M, D, H, M]
@@ -150,7 +181,7 @@ function calendarSubscribeHtml(byTeam: Record<string, ExportFile[]>) {
     .join("\n");
 
   return `
-    <h2>📅 Kalender abonnieren</h2>
+    <h2>${ICONS.calendar} Kalender abonnieren</h2>
     <p class="hint">
       Einmal abonnieren und die Termine aktualisieren sich automatisch. Funktioniert mit
       Google Kalender, Apple Kalender und Outlook.
@@ -168,6 +199,16 @@ function ensureExportDir() {
   if (!existsSync(EXPORT_DIR)) {
     mkdirSync(EXPORT_DIR);
   }
+}
+
+/**
+ * Formats a BFV season id into a human-readable label.
+ * The API returns ids like "2526", which means the 2025/26 season.
+ */
+function formatSeason(seasonId: string): string {
+  const match = seasonId.match(/^(\d{2})(\d{2})$/);
+  if (!match) return seasonId;
+  return `20${match[1]}/${match[2]}`;
 }
 
 /**
@@ -215,6 +256,47 @@ function humanFileSize(bytes: number): string {
 }
 
 /**
+ * Resolves each team's current BFV widget id by reading the club page.
+ *
+ * A team's match-plan (widget) id is bound to a single season and changes when
+ * the new season is published, but the club id is permanent. The club page
+ * lists every team with a link of the form
+ * `https://www.bfv.de/mannschaften/<slug>/<widgetId>`, so we can map slug to id
+ * and stay correct across seasons without editing the config by hand.
+ *
+ * Returns a slug to id map. On failure it returns whatever it managed to read
+ * (possibly empty); callers fall back to each team's configured id.
+ */
+async function resolveTeamIds(): Promise<Map<string, string>> {
+  const url = `https://www.bfv.de/vereine/verein/${CLUB_ID}`;
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "bfv-matches-exporter" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await res.text();
+      const map = new Map<string, string>();
+      const linkRe = /\/mannschaften\/([a-z0-9-]+)\/([0-9A-Z]{32})/g;
+      let m: RegExpExecArray | null;
+      while ((m = linkRe.exec(html)) !== null) {
+        const slug = m[1];
+        const id = m[2];
+        if (slug && id && !map.has(slug)) map.set(slug, id);
+      }
+      if (map.size === 0) throw new Error("keine Mannschaften auf der Vereinsseite gefunden");
+      return map;
+    } catch (error) {
+      const backoff = 2000 * 2 ** (attempt - 1);
+      console.warn(
+        `Vereinsseite konnte nicht gelesen werden (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
+          (attempt < FETCH_ATTEMPTS ? ` Neuer Versuch in ${backoff / 1000}s.` : " Nutze hinterlegte IDs.")
+      );
+      if (attempt < FETCH_ATTEMPTS) await sleep(backoff);
+    }
+  }
+  return new Map();
+}
+
+/**
  * Fetches a team's matches with retries and exponential backoff.
  * Throws after the final attempt so the caller can abort the run and keep
  * the last successful deployment live instead of publishing empty data.
@@ -229,7 +311,7 @@ async function fetchTeamMatches(team: { id: string; name: string }) {
       lastError = error;
       const backoff = 2000 * 2 ** (attempt - 1);
       console.warn(
-        `⚠️  Abruf für ${team.name} fehlgeschlagen (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
+        `Abruf für ${team.name} fehlgeschlagen (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
           (attempt < FETCH_ATTEMPTS ? ` Neuer Versuch in ${backoff / 1000}s.` : "")
       );
       if (attempt < FETCH_ATTEMPTS) await sleep(backoff);
@@ -260,13 +342,13 @@ function exportToICS(matches: ExportMatch[], filename: string) {
       return;
     }
     writeFileSync(path.join(EXPORT_DIR, filename), value, "utf8");
-    console.log(`✅ ICS exportiert: ${path.join(EXPORT_DIR, filename)}`);
+    console.log(`ICS exportiert: ${path.join(EXPORT_DIR, filename)}`);
   });
 }
 
 /**
  * Exports matches as a Jira-compatible CSV file for Jira import.
- * Groups all games under monthly parent tasks like "Spiele Monat März 2025".
+ * Groups all games under monthly parent tasks like "Spiele Monat März 2026".
  *
  * Jira Cloud CSV import can establish hierarchy via:
  * - "Work item ID": unique ID per row
@@ -284,7 +366,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     });
     const csvWithBom = "﻿" + parser.parse([]);
     writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
-    console.log(`✅ Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
+    console.log(`Jira CSV exportiert (keine Spiele): ${path.join(EXPORT_DIR, filename)}`);
     return;
   }
 
@@ -361,7 +443,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
     Parent: number | string | "" ;
   }[] = [];
 
-  // Parent rows: one per month (e.g. "Spiele Monat März 2025")
+  // Parent rows: one per month (e.g. "Spiele Monat März 2026")
   for (const [key, { label }] of monthEntries) {
     const id = nextId++;
     monthIdByKey.set(key, id);
@@ -425,7 +507,7 @@ function exportToJiraCSV(matches: ExportMatch[], filename: string) {
   const csv = parser.parse(jiraRows);
   const csvWithBom = "﻿" + csv;
   writeFileSync(path.join(EXPORT_DIR, filename), csvWithBom, "utf8");
-  console.log(`✅ Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
+  console.log(`Jira CSV exportiert: ${path.join(EXPORT_DIR, filename)}`);
 }
 
 /**
@@ -440,7 +522,7 @@ function exportToCSV(matches: ExportMatch[], filename: string) {
   const csvWithBom = "﻿" + csv;
 
   writeFileSync(csvPath, csvWithBom, "utf8");
-  console.log(`✅ CSV exportiert: ${csvPath}`);
+  console.log(`CSV exportiert: ${csvPath}`);
 }
 
 /**
@@ -510,7 +592,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
   const xlsxPath = path.join(EXPORT_DIR, filename);
 
   await workbook.xlsx.writeFile(xlsxPath);
-  console.log(`✅ XLSX exportiert: ${xlsxPath}`);
+  console.log(`XLSX exportiert: ${xlsxPath}`);
 }
 
 // === HTML GENERATION ===
@@ -518,7 +600,7 @@ async function exportToXLSX(matches: ExportMatch[], filename: string) {
 /**
  * Generates a fancy, mobile-friendly, auto-refreshing index.html listing all exports.
  */
-function generateFancyIndexHtml(dir: string) {
+function generateFancyIndexHtml(dir: string, seasonLabel: string) {
   const allCsvByTeam = getFilesByTypeAndTeam(dir, ".csv");
   const xlsxByTeam = getFilesByTypeAndTeam(dir, ".xlsx");
   const icsByTeam = getFilesByTypeAndTeam(dir, ".ics");
@@ -543,9 +625,9 @@ function generateFancyIndexHtml(dir: string) {
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <title>Spielplan – Sportverein 1945 Untereuerheim e.V.</title>
+  <title>Spielplan des Sportvereins 1945 Untereuerheim e.V.</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spielplan und Exporte der SG Gädheim/Untereuerheim – Sportverein 1945 Untereuerheim e.V.">
+  <meta name="description" content="Spielplan und Exporte der SG Gädheim/Untereuerheim. Sportverein 1945 Untereuerheim e.V.">
   <link rel="icon" href="Logo.png" type="image/png">
   <meta http-equiv="refresh" content="300">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -630,6 +712,15 @@ function generateFancyIndexHtml(dir: string) {
       align-items: center;
       gap: 0.5rem;
     }
+    .ico {
+      width: 1.25rem;
+      height: 1.25rem;
+      stroke: currentColor;
+      fill: none;
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+    .ico-sm { width: 1rem; height: 1rem; }
     h3 {
       font-size: 1rem;
       font-weight: 500;
@@ -721,22 +812,22 @@ function generateFancyIndexHtml(dir: string) {
       <img src="Logo.png" alt="Sportverein 1945 Untereuerheim" class="logo">
       <div class="header-text">
         <h1>Sportverein 1945 Untereuerheim e.V.</h1>
-        <p class="tagline">Wir sind Untereuerheim – Spielplan & Exporte</p>
+        <p class="tagline">Wir sind Untereuerheim. Spielplan und Exporte.</p>
       </div>
     </div>
   </header>
   <main class="container">
     <p class="intro">
-      Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
+      ${seasonLabel ? `<strong>Saison ${seasonLabel}.</strong> ` : ""}Hier finden Sie die neuesten Spielplan-Exporte (CSV, Excel, Kalender, Jira) der SG Gädheim/Untereuerheim.
       Die Dateinamen bleiben stabil, ein Lesezeichen oder Kalender-Abo funktioniert also dauerhaft.
       Die Seite aktualisiert sich automatisch alle 5 Minuten.
-      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">→ Zum Verein</a>
+      <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">Zum Verein ${ICONS.arrowRight}</a>
     </p>
     ${calendarSubscribeHtml(icsByTeam)}
-    ${sectionHtml("CSV", csvByTeam, ".csv", "📄")}
-    ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", "📊")}
-    ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", "📅")}
-    ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", "📝")}
+    ${sectionHtml("CSV", csvByTeam, ".csv", ICONS.csv)}
+    ${sectionHtml("Excel (XLSX)", xlsxByTeam, ".xlsx", ICONS.xlsx)}
+    ${sectionHtml("Kalender (ICS)", icsByTeam, ".ics", ICONS.calendar)}
+    ${sectionHtml("Jira-Import (CSV)", jiraCsvByTeam, ".csv", ICONS.jira)}
     <div class="footer">
       Letzte Aktualisierung: ${new Date().toLocaleString("de-DE")}<br>
       <a href="https://www.sv-untereuerheim.de" target="_blank" rel="noopener">Sportverein 1945 Untereuerheim e.V.</a> · Triebweg 9 · 97508 Grettstadt/Untereuerheim
@@ -750,7 +841,7 @@ function generateFancyIndexHtml(dir: string) {
 `;
 
   writeFileSync(path.join(dir, "index.html"), html, "utf8");
-  console.log(`✅ index.html generiert: ${path.join(dir, "index.html")}`);
+  console.log(`index.html generiert: ${path.join(dir, "index.html")}`);
 }
 
 // === MAIN ===
@@ -765,10 +856,27 @@ async function main() {
   // Collect all matches for combined export
   let allMatches: ExportMatch[] = [];
 
+  // Track which BFV season(s) the resolved team ids point at. A team's widget
+  // id is bound to one season, so this is how a maintainer can tell at a glance
+  // which season the site currently shows.
+  const seasonIds = new Set<string>();
+
+  // Resolve each team's current widget id from the club page so a new season
+  // needs no manual id change. Falls back to the configured id per team.
+  const resolvedIds = await resolveTeamIds();
+
   // Export per-team files. A failed fetch (after retries) aborts the whole run
   // so the previous, good GitHub Pages deployment stays live.
   for (const team of TEAMS) {
-    const data = await fetchTeamMatches(team);
+    const liveId = resolvedIds.get(team.slug);
+    const id = liveId ?? team.fallbackId;
+    console.log(`Mannschaft ${team.name}: ${id} (${liveId ? "live" : "hinterlegt"})`);
+
+    const data = await fetchTeamMatches({ id, name: team.name });
+
+    if (data.team?.seasonId) {
+      seasonIds.add(data.team.seasonId);
+    }
 
     // Map API data to export format (without Match-ID)
     const teamMatches: ExportMatch[] = data.matches.map((match: any) => ({
@@ -806,12 +914,18 @@ async function main() {
   const logoSrc = path.join(process.cwd(), "src", "Logo.png");
   if (existsSync(logoSrc)) {
     copyFileSync(logoSrc, path.join(EXPORT_DIR, "Logo.png"));
-    console.log("✅ Logo kopiert");
+    console.log("Logo kopiert");
+  }
+
+  // Build a readable season label (usually one season across all teams)
+  const seasonLabel = Array.from(seasonIds).sort().map(formatSeason).join(", ");
+  if (seasonLabel) {
+    console.log(`Saison: ${seasonLabel}`);
   }
 
   // Generate the HTML index page
-  generateFancyIndexHtml(EXPORT_DIR);
-  console.log("Fertig! 🚀");
+  generateFancyIndexHtml(EXPORT_DIR, seasonLabel);
+  console.log("Fertig!");
 }
 
 // Run the main function and handle fatal errors

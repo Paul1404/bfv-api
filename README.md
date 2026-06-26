@@ -11,6 +11,7 @@
 - Fetches all matches for one or more BFV teams via the [bfv-api-js](https://github.com/SebastianSiedler/bfv-api-js) client
 - Exports each team's matches as **CSV**, **XLSX** (Excel), **ICS** (calendar), and **Jira CSV**, with German column names
 - Exports a combined file for all teams
+- **Season-proof**: resolves each team's current match-plan id from the club page on every run, so a new season needs no config change
 - **Stable file names** (no timestamps), so download links and calendar subscriptions keep working forever
 - Subscribe-once calendar feeds via `webcal://` with stable event IDs (no duplicate events)
 - Generates a modern, responsive `index.html` for easy download and one-click calendar subscription
@@ -99,6 +100,14 @@ The goal is set-and-forget. Three things keep it running on its own:
 - **Dependencies:** Dependabot batches patch and minor updates into one weekly PR per ecosystem, CI (`ci.yml`) builds them, and `dependabot-auto-merge.yml` auto-merges them. Major updates come as individual PRs and wait for a human.
 - **Alerting:** a failed run opens (or comments on) a single tracking issue labelled `deploy-failure`, and the next successful run closes it automatically. The repo only asks for attention when a run actually breaks.
 
+### Seasons: nothing to do
+
+A BFV team match-plan id is bound to a single season and changes when the new season is published, but the club id is permanent. Each run reads the club page and resolves every team's current id from it (`resolveTeamIds` in `src/index.ts`), so the new season is picked up on its own. No yearly id edit.
+
+If the club page can't be read, each team falls back to its last known id (`fallbackId`), so a scrape issue or a BFV outage never takes the site down. The generated page shows the active season (e.g. "Saison 2025/26") and the build logs print which id each team resolved to and whether it came from the club page (`live`) or the fallback (`hinterlegt`).
+
+You only touch the config when the club itself changes (adding or removing a team, or a team slug changes): edit the `TEAMS` array, where each entry has a `slug`, a display `name`, and a `fallbackId`. The stable `CLUB_ID` is set once.
+
 One-time repo settings for auto-merge to work:
 
 1. Settings → General → enable **Allow auto-merge**.
@@ -131,7 +140,10 @@ MIT License
 ## 🙋 FAQ
 
 **Q: How do I add more teams?**  
-A: Edit the `TEAMS` array in `src/index.ts` with the desired team IDs and names.
+A: Add an entry to the `TEAMS` array in `src/index.ts` with the team's `slug` (from its bfv.de team-page URL), a display `name`, and a `fallbackId` (its current widget id).
+
+**Q: Do I need to update IDs every season?**  
+A: No. Team ids are resolved from the club page on each run, so a new season is picked up automatically. The `fallbackId` values are only a safety net for when the club page can't be read. See "Seasons: nothing to do" above.
 
 **Q: How do I change the export schedule?**  
 A: Edit the `cron` line in `.github/workflows/publish-gh-pages.yml`.

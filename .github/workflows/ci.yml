@@ -2,10 +2,11 @@ name: CI
 
 # Verifies the project still builds. This is the gate Dependabot auto-merge
 # waits on, so a bad dependency bump can never be merged automatically.
+# Runs on pull_request only: a branch push in the same repo would otherwise
+# trigger this twice (once for push, once for the PR) and burn double the
+# runner minutes. Pushes to main are built and deployed by publish-gh-pages.
 on:
   pull_request:
-  push:
-    branches-ignore: [main]
 
 permissions:
   contents: read

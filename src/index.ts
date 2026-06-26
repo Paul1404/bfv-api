@@ -16,10 +16,26 @@ import path from "path";
 
 // === CONFIGURATION ===
 
-// List of teams to export (add more as needed)
+// BFV club id. Unlike a team's match-plan id, this is permanent across seasons.
+// The per-team widget ids are resolved from the club page each run (see
+// resolveTeamIds), so a new season needs no manual id update.
+const CLUB_ID = "00ES8GNLA8000012VV0AG08LVUPGND5I";
+
+// Teams to export. `slug` is the team's BFV page slug, used to look up its
+// current widget id on the club page. `fallbackId` is the last known id and is
+// used only if that lookup fails, so a scrape issue or BFV outage never takes
+// the site down.
 const TEAMS = [
-  { id: "016PBQB78C000000VV0AG80NVV8OQVTB", name: "Gädheim-Untereuerheim" },
-  { id: "02IDHSKCTG000000VS5489B2VU2I8R4H", name: "Gädheim-Untereuerheim II" },
+  {
+    slug: "sg-1-gaedheim-untereuerheim",
+    name: "Gädheim-Untereuerheim",
+    fallbackId: "016PBQB78C000000VV0AG80NVV8OQVTB",
+  },
+  {
+    slug: "sg-2-gaedheim-untereuerheim-ii",
+    name: "Gädheim-Untereuerheim II",
+    fallbackId: "02IDHSKCTG000000VS5489B2VU2I8R4H",
+  },
 ];
 
 // Output directory for all exports and HTML
@@ -237,6 +253,47 @@ function humanFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+/**
+ * Resolves each team's current BFV widget id by reading the club page.
+ *
+ * A team's match-plan (widget) id is bound to a single season and changes when
+ * the new season is published, but the club id is permanent. The club page
+ * lists every team with a link of the form
+ * `https://www.bfv.de/mannschaften/<slug>/<widgetId>`, so we can map slug to id
+ * and stay correct across seasons without editing the config by hand.
+ *
+ * Returns a slug to id map. On failure it returns whatever it managed to read
+ * (possibly empty); callers fall back to each team's configured id.
+ */
+async function resolveTeamIds(): Promise<Map<string, string>> {
+  const url = `https://www.bfv.de/vereine/verein/${CLUB_ID}`;
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "bfv-matches-exporter" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await res.text();
+      const map = new Map<string, string>();
+      const linkRe = /\/mannschaften\/([a-z0-9-]+)\/([0-9A-Z]{32})/g;
+      let m: RegExpExecArray | null;
+      while ((m = linkRe.exec(html)) !== null) {
+        const slug = m[1];
+        const id = m[2];
+        if (slug && id && !map.has(slug)) map.set(slug, id);
+      }
+      if (map.size === 0) throw new Error("keine Mannschaften auf der Vereinsseite gefunden");
+      return map;
+    } catch (error) {
+      const backoff = 2000 * 2 ** (attempt - 1);
+      console.warn(
+        `Vereinsseite konnte nicht gelesen werden (Versuch ${attempt}/${FETCH_ATTEMPTS}).` +
+          (attempt < FETCH_ATTEMPTS ? ` Neuer Versuch in ${backoff / 1000}s.` : " Nutze hinterlegte IDs.")
+      );
+      if (attempt < FETCH_ATTEMPTS) await sleep(backoff);
+    }
+  }
+  return new Map();
 }
 
 /**
@@ -799,15 +856,23 @@ async function main() {
   // Collect all matches for combined export
   let allMatches: ExportMatch[] = [];
 
-  // Track which BFV season(s) the configured team ids resolve to. A team's
-  // permanentId is bound to one season, so this is how a maintainer can tell
-  // at a glance whether the ids still point at the current season.
+  // Track which BFV season(s) the resolved team ids point at. A team's widget
+  // id is bound to one season, so this is how a maintainer can tell at a glance
+  // which season the site currently shows.
   const seasonIds = new Set<string>();
+
+  // Resolve each team's current widget id from the club page so a new season
+  // needs no manual id change. Falls back to the configured id per team.
+  const resolvedIds = await resolveTeamIds();
 
   // Export per-team files. A failed fetch (after retries) aborts the whole run
   // so the previous, good GitHub Pages deployment stays live.
   for (const team of TEAMS) {
-    const data = await fetchTeamMatches(team);
+    const liveId = resolvedIds.get(team.slug);
+    const id = liveId ?? team.fallbackId;
+    console.log(`Mannschaft ${team.name}: ${id} (${liveId ? "live" : "hinterlegt"})`);
+
+    const data = await fetchTeamMatches({ id, name: team.name });
 
     if (data.team?.seasonId) {
       seasonIds.add(data.team.seasonId);
